@@ -59,7 +59,18 @@ if ! command -v node &> /dev/null; then
 fi
 
 # Installer Chromium, X11 et un gestionnaire de fenêtres minimal (Openbox + LightDM)
-sudo apt-get install -y xserver-xorg x11-xserver-utils xinit lightdm openbox chromium unclutter || error_exit "Échec de l'installation des composants graphiques."
+sudo apt-get install -y xserver-xorg x11-xserver-utils xinit lightdm openbox chromium unclutter \
+    fonts-noto fonts-liberation fonts-roboto || error_exit "Échec de l'installation des composants graphiques."
+
+# 3b. Installation de polices personnalisées depuis la partition boot
+if [ -d "$BOOT_DIR/fonts" ]; then
+    log_message "Polices personnalisées détectées dans $BOOT_DIR/fonts. Installation..."
+    sudo mkdir -p /usr/local/share/fonts/pidyn
+    sudo cp "$BOOT_DIR/fonts"/*.{ttf,otf} /usr/local/share/fonts/pidyn/ 2>/dev/null
+    sudo fc-cache -f -v
+else
+    log_message "Aucune police personnalisée trouvée dans $BOOT_DIR/fonts (optionnel)."
+fi
 
 # 4. Préparer le dossier de l'application
 log_message "Préparation du dossier d'installation $INSTALL_DIR..."

@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs-extra');
 const multer = require('multer');
 const bcrypt = require('bcrypt');
+const AdmZip = require('adm-zip');
+const mime = require('mime-types');
 const saltRounds = 10;
 
 const app = express();
@@ -32,11 +34,12 @@ const defaultData = {
     playlists: {
         'p1': { name: 'Promo Eté', items: [{ type: 'image', url: '/media/ete.jpg', duration: 5000 }] },
         'p2': { name: 'Infos Interne', items: [{ type: 'video', url: '/media/security.mp4', duration: 30000 }] }
-    },
+    }, 
     players: {
         'pi-accueil-01': { name: 'Ecran Accueil', manualPlaylistId: 'p1', currentPlaylistId: 'p1', lastSeen: null, status: 'approved' }
     }
-    , schedules: [] // Nouvelle section pour les planifications
+    , schedules: [], // Nouvelle section pour les planifications
+    media: [] // Nouvelle section pour la médiathèque
 };
 
 // Chargement de la base de données au démarrage
@@ -65,9 +68,13 @@ if (!fs.existsSync(DB_PATH)) {
 fs.ensureDirSync(MEDIA_DIR);
 
 // Fonction pour vérifier et appliquer les planifications
-const checkSchedules = () => {
+const checkSchedules = (targetDeviceId = null, forceEmit = false) => {
     const now = new Date();
-    for (const deviceId in data.players) {
+    const playersToCheck = (targetDeviceId && data.players[targetDeviceId]) 
+        ? { [targetDeviceId]: data.players[targetDeviceId] } 
+        : data.players;
+
+    for (const deviceId in playersToCheck) {
         const player = data.players[deviceId];
         if (player.status !== 'approved') continue; // Ne planifier que pour les afficheurs approuvés
 
@@ -87,7 +94,7 @@ const checkSchedules = () => {
         let newPlaylistId = activeSchedule ? activeSchedule.playlistId : (player.manualPlaylistId || null);
 
         // Seulement mettre à jour si la playlist a changé
-        if (player.currentPlaylistId !== newPlaylistId) {
+        if (player.currentPlaylistId !== newPlaylistId || forceEmit) {
             player.currentPlaylistId = newPlaylistId;
             const targetPlaylist = newPlaylistId && data.playlists[newPlaylistId] ? data.playlists[newPlaylistId] : null;
             if (targetPlaylist) {
@@ -165,10 +172,50 @@ app.post('/api/login', async (req, res) => {
 // API Admin : Lister les players et affecter des playlists
 app.get('/api/admin/data', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => res.json(data));
 
+// API Admin : Lister les médias
 app.get('/api/admin/media', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
-    const files = fs.readdirSync(MEDIA_DIR);
-    res.json(files);
+    res.json(data.media);
 });
+
+app.delete('/api/admin/media/:id', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { id } = req.params;
+    const index = data.media.findIndex(m => m.id === id);
+    if (index === -1) return res.status(404).send('Média non trouvé');
+
+    const item = data.media[index];
+    // Correction du chemin pour gérer les fichiers dans des sous-dossiers (ZIP extraits)
+    const relativePath = item.url.replace('/media/', '');
+    const filePath = path.join(MEDIA_DIR, relativePath);
+
+    try {
+        // Suppression physique du fichier
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (e) {
+        console.error("Erreur lors de la suppression du fichier physique:", e);
+    }
+
+    data.media.splice(index, 1);
+    saveDb();
+    res.json({ success: true });
+});
+
+// Route pour la page de gestion de la médiathèque
+app.get('/mediatheque', (req, res) => {
+    res.sendFile(path.join(__dirname, 'media.html'));
+});
+
+// Helper to get file type from mimetype or extension
+const getFileType = (mimetype, filename) => {
+    if (mimetype.startsWith('image/')) return 'image';
+    if (mimetype.startsWith('video/')) return 'video';
+    if (mimetype.startsWith('audio/')) return 'audio';
+
+    const ext = path.extname(filename).toLowerCase();
+    if (ext === '.html' || ext === '.htm') return 'html';
+    if (ext === '.svg') return 'svg';
+    if (ext === '.json') return 'json';
+    return 'other';
+};
 
 // API Admin : Gestion des utilisateurs
 app.get('/api/admin/users', authMiddleware, checkRole(['admin']), (req, res) => {
@@ -232,9 +279,83 @@ app.delete('/api/admin/users/:username', authMiddleware, checkRole(['admin']), (
     res.json({ success: true });
 });
 
-app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'author']), upload.single('file'), (req, res) => {
+app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'author']), upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).send('Aucun fichier uploadé.');
-    res.json({ url: `/media/${req.file.filename}` });
+
+    const originalFilename = req.file.originalname;
+    const uploadedFilePath = req.file.path;
+    const uploadedFileMimetype = req.file.mimetype;
+    const uploadedFileName = req.file.filename; // This is the Date.now() + extname
+
+    // Détection plus robuste du format ZIP (MimeType ou Extension)
+    const isZip = uploadedFileMimetype === 'application/zip' || 
+                  uploadedFileMimetype === 'application/x-zip-compressed' || 
+                  path.extname(originalFilename).toLowerCase() === '.zip';
+
+    if (isZip) {
+        try {
+            const zip = new AdmZip(uploadedFilePath);
+            const zipEntries = zip.getEntries();
+
+            const extractedFiles = [];
+            const zipExtractDirName = `zip_extract_${Date.now()}_${path.parse(originalFilename).name.replace(/[^a-z0-9_.-]/gi, '_')}`;
+            const zipExtractDirPath = path.join(MEDIA_DIR, zipExtractDirName);
+            await fs.ensureDir(zipExtractDirPath);
+
+            for (const zipEntry of zipEntries) {
+                if (!zipEntry.isDirectory) {
+                    const entryFilename = zipEntry.entryName;
+                    const fullExtractPath = path.join(zipExtractDirPath, entryFilename);
+
+                    // Ensure parent directories exist for the extracted file
+                    await fs.ensureDir(path.dirname(fullExtractPath));
+
+                    // Extract the file
+                    // Correction de l'ordre des paramètres : (entryName, targetPath, maintainEntryPath, overwrite)
+                    zip.extractEntryTo(zipEntry.entryName, path.dirname(fullExtractPath), false, true);
+
+                    const extractedMimeType = mime.lookup(entryFilename) || 'application/octet-stream';
+                    const urlPath = path.relative(MEDIA_DIR, fullExtractPath).split(path.sep).join('/');
+                    const mediaItem = {
+                        id: `m_${Date.now()}_${extractedFiles.length}`,
+                        filename: entryFilename,
+                        originalZip: originalFilename, // Permet de grouper dans l'éditeur
+                        url: `/media/${urlPath}`,
+                        type: getFileType(extractedMimeType, entryFilename),
+                        uploadedBy: req.user.username,
+                        uploadDate: new Date().toISOString(),
+                        parentZipDir: zipExtractDirName // Link to the original zip extraction directory
+                    };
+                    data.media.push(mediaItem);
+                    extractedFiles.push(mediaItem);
+                }
+            }
+            // Remove the original zip file after extraction
+            await fs.remove(uploadedFilePath);
+            saveDb();
+            return res.json({ message: 'Fichier ZIP extrait avec succès et médias ajoutés.', extractedFiles });
+
+        } catch (error) {
+            console.error('Erreur lors de l\'extraction du fichier ZIP:', error);
+            // Clean up the uploaded zip file if extraction fails
+            await fs.remove(uploadedFilePath);
+            return res.status(500).send('Erreur lors de l\'extraction du fichier ZIP.');
+        }
+    } else {
+        // Existing logic for non-zip files
+        const mediaItem = {
+            id: `m_${Date.now()}`,
+            filename: originalFilename,
+            url: `/media/${uploadedFileName}`,
+            type: getFileType(uploadedFileMimetype, originalFilename),
+            uploadedBy: req.user.username,
+            uploadDate: new Date().toISOString()
+        };
+
+        data.media.push(mediaItem);
+        saveDb();
+        res.json(mediaItem);
+    }
 });
 
 // Route pour l'import PPTX (Structure suggérée)
@@ -280,6 +401,38 @@ app.delete('/api/admin/playlists/:id', authMiddleware, checkRole(['admin', 'edit
         res.json({ success: true });
     } else {
         res.status(404).send('Diaporama non trouvé');
+    }
+});
+
+app.post('/api/admin/players/force-sync/:deviceId', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { deviceId } = req.params;
+    if (data.players[deviceId]) {
+        checkSchedules(deviceId, true);
+        res.json({ success: true, message: 'Synchronisation forcée effectuée.' });
+    } else {
+        res.status(404).send('Player non trouvé');
+    }
+});
+
+app.post('/api/admin/players/restart-screen/:deviceId', authMiddleware, checkRole(['admin']), (req, res) => {
+    const { deviceId } = req.params;
+    if (data.players[deviceId]) {
+        io.to(deviceId).emit('restart-service');
+        console.log(`📡 Commande de redémarrage envoyée à ${deviceId}`);
+        res.json({ success: true, message: 'Commande de redémarrage envoyée.' });
+    } else {
+        res.status(404).send('Player non trouvé');
+    }
+});
+
+app.post('/api/admin/players/clear-cache/:deviceId', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { deviceId } = req.params;
+    if (data.players[deviceId]) {
+        io.to(deviceId).emit('clear-local-cache');
+        console.log(`🧹 Commande de nettoyage du cache envoyée à ${deviceId}`);
+        res.json({ success: true, message: 'Commande de nettoyage envoyée.' });
+    } else {
+        res.status(404).send('Player non trouvé');
     }
 });
 
@@ -335,7 +488,14 @@ app.post('/api/admin/assign', authMiddleware, checkRole(['admin', 'editor']), (r
 
 // Socket.io avec authentification et gestion de salon (Room)
 io.use((socket, next) => {
-    if (socket.handshake.auth.token === API_KEY) return next();
+    const token = socket.handshake.auth.token;
+    if (token === API_KEY) return next();
+
+    // Autoriser aussi les administrateurs via leur token (format username:role)
+    if (token && token.includes(':')) {
+        const [username, role] = token.split(':');
+        if (data.users.find(u => u.username === username && u.role === role)) return next();
+    }
     next(new Error('Auth error'));
 });
 
@@ -347,13 +507,45 @@ io.on('connection', (socket) => {
     
     // Enregistrement automatique du player s'il est nouveau
     if (!data.players[deviceId]) {
-        data.players[deviceId] = { name: `Nouveau Pi (${deviceId})`, manualPlaylistId: null, currentPlaylistId: null, lastSeen: null, status: 'pending' }; // Marquer comme en attente
+        data.players[deviceId] = { name: `Nouveau Pi (${deviceId})`, manualPlaylistId: null, currentPlaylistId: null, lastSeen: null, status: 'pending', ip: null, mac: null }; // Marquer comme en attente
         saveDb();
     }
     data.players[deviceId].lastSeen = new Date();
 
+    // Notifier les administrateurs que le lecteur est en ligne
+    io.emit('admin-player-status', { deviceId, status: { online: true } });
+
+    // Maintenir la date de dernière vue tant que le lecteur est connecté
+    const heartbeat = setInterval(() => {
+        if (data.players[deviceId]) data.players[deviceId].lastSeen = new Date();
+    }, 30000);
+
     // Ré-évaluer les planifications pour ce player au démarrage
-    checkSchedules();
+    checkSchedules(deviceId, true);
+
+    // Gérer les mises à jour de statut de téléchargement
+    socket.on('player-status-update', (status) => {
+        if (data.players[deviceId]) {
+            data.players[deviceId].downloadStatus = status;
+            io.emit('admin-player-status', { deviceId, status });
+        }
+    });
+
+    // Mise à jour des infos réseau (IP/MAC)
+    socket.on('player-info-update', (info) => {
+        if (data.players[deviceId]) {
+            data.players[deviceId].ip = info.ip;
+            data.players[deviceId].mac = info.mac;
+            saveDb();
+            console.log(`Player ${deviceId} info updated: IP=${info.ip}, MAC=${info.mac}`);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        clearInterval(heartbeat);
+        // Notifier les administrateurs que le lecteur est hors ligne
+        io.emit('admin-player-status', { deviceId, status: { online: false } });
+    });
 });
 
 // Exécuter checkSchedules toutes les minutes

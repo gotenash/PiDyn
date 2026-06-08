@@ -59,104 +59,93 @@
               "text": "Collège de Coutances",
               "fontFamily": "Arial, sans-serif",
               "fontSize": 24,
-              "color": "#ffffff",
+              "color": "#000000",
               "textAlign": "center",
               "clockFormat": "HH:mm:ss"
             }
           ]
         },
         {
-          "duration": 5000,
+          "duration": 20000,
           "zones": [
             {
-              "x": 22,
-              "y": 14,
-              "w": 56,
-              "h": 68,
-              "type": "image",
-              "url": "/media/1780837654870.jpg",
+              "x": 18,
+              "y": 10,
+              "w": 54,
+              "h": 78,
+              "type": "web",
+              "url": "/media/zip_extract_1780949185853_thi_is_not/this-is-not-a-slideshow.sozi.html",
               "text": "Nouveau Texte",
               "clockFormat": "HH:mm:ss"
             }
-          ]
+          ],
+          "backgroundColor": "#ffffff"
         }
       ],
-      "resolution": "16/9"
-    },
-    "p_1780841483559": {
-      "name": "Collège",
-      "items": [
-        {
-          "duration": 5000,
-          "zones": [
-            {
-              "x": 26.1654,
-              "y": 22.8571,
-              "w": 46.1246,
-              "h": 50.1587,
-              "type": "text",
-              "url": "",
-              "text": "Kikooo"
-            }
-          ]
-        },
-        {
-          "duration": 5000,
-          "zones": [
-            {
-              "x": 50,
-              "y": 8,
-              "w": 46.1246,
-              "h": 66.0317,
-              "type": "video",
-              "url": "/media/1780845154458.mp4",
-              "text": ""
-            }
-          ]
-        },
-        {
-          "duration": 5000,
-          "zones": [
-            {
-              "x": 0.149999,
-              "y": 0.952381,
-              "w": 99.4211,
-              "h": 98.4127,
-              "type": "image",
-              "url": "/media/1780842215804.png",
-              "text": ""
-            },
-            {
-              "x": 12,
-              "y": 8,
-              "w": 43.733995579754286,
-              "h": 73.3333238095238,
-              "type": "image",
-              "url": "/media/1780837654870.jpg",
-              "text": ""
-            }
-          ]
-        }
-      ],
-      "backgroundColor": "#7560ee",
+      "backgroundColor": "#ffffff",
       "resolution": "16/9"
     }
   },
   "players": {
-    "pi-accueil-01": {
-      "name": "Ecran Accueil",
-      "manualPlaylistId": "p_1780841483559",
-      "currentPlaylistId": "p_1780841483559",
-      "lastSeen": null,
-      "status": "approved"
-    },
     "mon-pi-accueil": {
       "name": "Nouveau Pi (mon-pi-accueil)",
       "manualPlaylistId": "p2",
       "currentPlaylistId": "p2",
-      "lastSeen": "2026-06-08T07:25:34.311Z",
-      "status": "approved"
+      "lastSeen": "2026-06-08T20:53:49.692Z",
+      "status": "approved",
+      "ip": "192.168.1.196",
+      "mac": "b8:27:eb:4e:4c:ea"
     }
   },
-  "schedules": []
+  "schedules": [],
+  "media": [
+    {
+      "id": "m_1780942683709",
+      "filename": "logo_gadgeto.png",
+      "url": "/media/1780942683704.png",
+      "type": "image",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T18:18:03.709Z"
+    },
+    {
+      "id": "m_1780949185870_0",
+      "filename": "this-is-not-a-slideshow.orig.svg",
+      "originalZip": "thi_is_not.zip",
+      "url": "/media/zip_extract_1780949185853_thi_is_not/this-is-not-a-slideshow.orig.svg",
+      "type": "image",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T20:06:25.870Z",
+      "parentZipDir": "zip_extract_1780949185853_thi_is_not"
+    },
+    {
+      "id": "m_1780949185877_1",
+      "filename": "this-is-not-a-slideshow.sozi.html",
+      "originalZip": "thi_is_not.zip",
+      "url": "/media/zip_extract_1780949185853_thi_is_not/this-is-not-a-slideshow.sozi.html",
+      "type": "html",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T20:06:25.877Z",
+      "parentZipDir": "zip_extract_1780949185853_thi_is_not"
+    },
+    {
+      "id": "m_1780949185879_2",
+      "filename": "this-is-not-a-slideshow.sozi.json",
+      "originalZip": "thi_is_not.zip",
+      "url": "/media/zip_extract_1780949185853_thi_is_not/this-is-not-a-slideshow.sozi.json",
+      "type": "json",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T20:06:25.879Z",
+      "parentZipDir": "zip_extract_1780949185853_thi_is_not"
+    },
+    {
+      "id": "m_1780949185887_3",
+      "filename": "this-is-not-a-slideshow.svg",
+      "originalZip": "thi_is_not.zip",
+      "url": "/media/zip_extract_1780949185853_thi_is_not/this-is-not-a-slideshow.svg",
+      "type": "image",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T20:06:25.887Z",
+      "parentZipDir": "zip_extract_1780949185853_thi_is_not"
+    }
+  ]
 }

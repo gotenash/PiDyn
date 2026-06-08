@@ -3,16 +3,18 @@
 <head>
     <title>PiDyn Admin</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
-        section { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
+        section { background: #1a252f; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #34495e; }
+        th, td { padding: 10px; border: 1px solid #1a252f; text-align: left; }
+        th { background: #3498db; color: white; }
         .item-row { display: flex; gap: 10px; margin-bottom: 10px; }
-        input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        input, select { padding: 8px; border: 1px solid #34495e; border-radius: 4px; background: #34495e; color: white; }
         .media-item { display: inline-block; background: #eee; padding: 5px; margin: 5px; border-radius: 4px; font-size: 0.8em; }
-        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button { padding: 10px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button.secondary { background: #6c757d; }
-        #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 100; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
+        #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 100; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
+        h1, h2 { color: #3498db; }
         .media-thumbnail {
             width: 80px; /* Taille fixe pour les miniatures */
             height: 60px;
@@ -21,8 +23,18 @@
             margin-right: 5px;
             border: 1px solid #ccc;
         }
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .online { background-color: #2ecc71; }
+        .offline { background-color: #e74c3c; }
     </style>
 </head>
+<script src="/socket.io/socket.io.js"></script>
 <body>
     <div id="login-overlay">
         <h2>Connexion PiDyn</h2>
@@ -34,6 +46,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <h1>Gestionnaire d'Affichage Dynamique</h1>
         <div>
+            <button id="media-btn" style="display: none; background: #28a745;" onclick="window.location.href='/mediatheque'">Médiathèque</button>
             <button id="users-admin-btn" style="display: none; background: #6f42c1;" onclick="window.location.href='/users'">Gestion Utilisateurs</button>
             <button class="secondary" onclick="logout()">Déconnexion</button>
         </div>
@@ -42,13 +55,6 @@
     <section id="players-section" style="display: none;">
         <h2>Écrans Connectés</h2>
         <div id="players-list"></div>
-    </section>
-
-    <section>
-        <h2>Médiathèque</h2>
-        <input type="file" id="upload-input">
-        <button onclick="uploadFile()">Uploader un fichier</button>
-        <div id="media-list" style="margin-top: 10px;"></div>
     </section>
 
     <section>
@@ -122,6 +128,8 @@
                 if (role === 'admin' || role === 'editor') document.getElementById('players-section').style.display = 'block';
                 // Seuls Admin et Editeur voient la gestion des agendas
                 if (role === 'admin' || role === 'editor') document.getElementById('schedules-section').style.display = 'block';
+                // Accès à la médiathèque pour les rôles autorisés
+                if (role === 'admin' || role === 'editor' || role === 'author') document.getElementById('media-btn').style.display = 'inline-block';
                 // Seul l'admin voit le bouton de gestion des utilisateurs
                 if (role === 'admin') document.getElementById('users-admin-btn').style.display = 'inline-block';
                 load();
@@ -135,31 +143,47 @@
             const { players, playlists } = await res.json();
 
             // Afficher la liste des diaporamas
-            // ... (le code existant pour les playlists reste inchangé)
+            // ... (le code existant pour les playlists reste inchangé) 
 
             // Afficher la liste des players
-            let html = '<table border="1"><tr><th>Nom</th><th>ID</th><th>Statut</th><th>Playlist</th><th>Dernière vue</th><th>Action</th></tr>';
+            let html = '<table border="1"><tr><th>Nom</th><th>ID</th><th>Statut</th><th>Playlist</th><th>IP</th><th>MAC</th><th>Dernière vue</th><th>Action</th></tr>';
             for (let id in players) {
                 const player = players[id];
                 const playlistName = player.currentPlaylistId ? (playlists[player.currentPlaylistId] ? playlists[player.currentPlaylistId].name : 'Inconnue') : 'Aucune';
                 const lastSeen = player.lastSeen ? new Date(player.lastSeen).toLocaleString() : 'Jamais';
+                // On considère l'écran en ligne s'il a été vu il y a moins d'une minute au chargement initial
+                const isOnline = player.lastSeen && (new Date() - new Date(player.lastSeen) < 60000);
+                player.downloadStatus = player.downloadStatus || {}; // Ensure downloadStatus exists
+                const statusClass = isOnline ? 'online' : 'offline';
+
                 html += `<tr>
-                    <td>${player.name}</td>
+                    <td><span id="status-dot-${id}" class="status-dot ${statusClass}" title="${isOnline ? 'En ligne' : 'Hors ligne'}"></span>${player.name}</td>
                     <td>${id}</td>
                     <td>${player.status === 'pending' ? 'En attente' : 'Approuvé'}</td>
-                    <td>${playlistName}</td>
+                    <td>
+                        ${playlistName}
+                        <span id="dl-status-${id}">
+                            ${player.downloadStatus.downloading ? `<br><small style="color:#f1c40f">⬇️ Synchro: ${player.downloadStatus.progress}%</small>` : ''}
+                        </span>
+                        ${player.status === 'approved' ? `
+                            <select onchange="assign('${id}', this.value)" style="margin-left: 5px;">
+                                <option value="">Manuel: Aucune</option>
+                                ${Object.keys(playlists).map(pId => `<option value="${pId}" ${player.manualPlaylistId === pId ? 'selected' : ''}>Manuel: ${playlists[pId].name}</option>`).join('')}
+                            </select>` : ''}
+                    </td>
+                    <td>${player.ip || 'N/A'}</td>
+                    <td>${player.mac || 'N/A'}</td>
                     <td>${lastSeen}</td>
                     <td>`;
                 if (player.status === 'pending') {
                     html += `<button onclick="approvePlayer('${id}')">Approuver</button>`;
                 }
-                html += `<button style="background:#dc3545" onclick="removePlayer('${id}')">Supprimer</button>`;
                 if (player.status === 'approved') {
-                    html += `<select onchange="assign('${id}', this.value)">
-                                <option value="">Manuel: Aucune</option>
-                                ${Object.keys(playlists).map(pId => `<option value="${pId}" ${player.manualPlaylistId === pId ? 'selected' : ''}>Manuel: ${playlists[pId].name}</option>`).join('')}
-                            </select>`;
+                    html += `<button class="secondary" title="Forcer la synchronisation" onclick="forceSync('${id}')">🔄</button>`;
+                    html += `<button class="secondary" title="Redémarrer l'écran" onclick="restartScreen('${id}')">🔌</button>`;
+                    html += `<button class="secondary" title="Nettoyer le cache local" onclick="clearCache('${id}')">🧹</button>`;
                 }
+                html += `<button style="background:#e74c3c" title="Supprimer" onclick="removePlayer('${id}')">🗑️</button>`;
                 html += `</td></tr>`;
             }
             document.getElementById('players-list').innerHTML = html + '</table>';
@@ -167,30 +191,14 @@
             // Afficher la liste des diaporamas (code existant)
             const plList = document.getElementById('playlists-list'); 
             plList.innerHTML = Object.keys(playlists).map(id => `
-                <div style="background:#eee; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="background:#34495e; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                     <span><strong>${playlists[id].name}</strong> (${playlists[id].items.length} éléments)</span>
-                    <div style="display:flex; gap:5px;">
-                        <button class="secondary" onclick="window.location.href='/editor?id=${id}'">Modifier</button>
-                        <button style="background:#dc3545" onclick="deletePlaylist('${id}')">Supprimer</button>
+                    <div style="display:flex; gap:5px;"> 
+                        <button class="secondary" title="Modifier" onclick="window.location.href='/editor?id=${id}'">✏️</button>
+                        <button style="background:#e74c3c" title="Supprimer" onclick="deletePlaylist('${id}')">🗑️</button>
                     </div>
                 </div>
             `).join('');
-
-            // Charger les fichiers média disponibles sur le serveur
-            const mediaRes = await fetch('/api/admin/media', { headers });
-            const files = await mediaRes.json();
-            const PREVIEW_AUTH = '?apiKey=ma_cle_secrete_123'; // Clé pour l'aperçu
-            const mediaList = document.getElementById('media-list');
-            mediaList.innerHTML = files.map(f => {
-                const fileUrl = `/media/${f}`;
-                let thumbnailHtml = '';
-                if (f.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
-                    thumbnailHtml = `<img src="${fileUrl}${PREVIEW_AUTH}" class="media-thumbnail">`;
-                } else if (f.match(/\.(mp4|webm|ogg)$/i)) {
-                    thumbnailHtml = `<video src="${fileUrl}${PREVIEW_AUTH}" class="media-thumbnail" muted></video>`;
-                }
-                return `<span class="media-item">${thumbnailHtml}${fileUrl} <button class="secondary" onclick="copyUrl('${fileUrl}')" style="padding:2px 5px; font-size:10px;">Copier l'URL</button></span>`;
-            }).join('');
         }
 
         // Fonctions pour la gestion des agendas
@@ -219,8 +227,8 @@
                     <td>${new Date(s.startTime).toLocaleString()}</td>
                     <td>${new Date(s.endTime).toLocaleString()}</td>
                     <td>
-                        <button class="secondary" onclick="editSchedule('${s.id}')">Modifier</button>
-                        <button style="background:#dc3545" onclick="deleteSchedule('${s.id}')">Supprimer</button>
+                        <button class="secondary" title="Modifier" onclick="editSchedule('${s.id}')">✏️</button>
+                        <button style="background:#e74c3c" title="Supprimer" onclick="deleteSchedule('${s.id}')">🗑️</button>
                     </td>
                 </tr>`;
             });
@@ -310,29 +318,6 @@
             }
         }
 
-        async function uploadFile() {
-            const input = document.getElementById('upload-input');
-            if (!input.files[0]) return alert("Veuillez choisir un fichier.");
-
-            const formData = new FormData();
-            formData.append('file', input.files[0]);
-
-            const res = await fetch('/api/admin/upload', {
-                method: 'POST',
-                headers: { 'x-access-token': token },
-                body: formData
-            });
-            
-            if (res.ok) {
-                alert('Fichier uploadé avec succès !');
-                input.value = '';
-                load(); // Rafraîchir la liste
-            } else {
-                const errorText = await res.text();
-                alert('Erreur lors de l\'envoi : ' + errorText);
-            }
-        }
-
         async function deletePlaylist(id) {
             if (!confirm('Voulez-vous vraiment supprimer ce diaporama ?')) return;
             const res = await fetch(`/api/admin/playlists/${id}`, {
@@ -361,6 +346,45 @@
             if (res.ok) {
                 alert("Importation réussie ! Un nouveau diaporama a été créé.");
                 load();
+            }
+        }
+
+        async function forceSync(deviceId) {
+            if (!confirm(`Voulez-vous forcer la synchronisation de l'afficheur ${deviceId} ?`)) return;
+            const res = await fetch(`/api/admin/players/force-sync/${deviceId}`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Commande de synchronisation envoyée !');
+            } else {
+                alert('Erreur lors de l\'envoi de la commande de synchronisation.');
+            }
+        }
+
+        async function restartScreen(deviceId) {
+            if (!confirm(`Voulez-vous redémarrer l'afficheur ${deviceId} ?`)) return;
+            const res = await fetch(`/api/admin/players/restart-screen/${deviceId}`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Commande de redémarrage envoyée !');
+            } else {
+                alert('Erreur lors de l\'envoi de la commande de redémarrage.');
+            }
+        }
+
+        async function clearCache(deviceId) {
+            if (!confirm(`Voulez-vous nettoyer les fichiers locaux (cache média) de l'afficheur ${deviceId} ?`)) return;
+            const res = await fetch(`/api/admin/players/clear-cache/${deviceId}`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Commande de nettoyage envoyée !');
+            } else {
+                alert('Erreur lors de l\'envoi de la commande de nettoyage.');
             }
         }
 

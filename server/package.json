@@ -1,0 +1,30 @@
+{
+  "name": "pidyn-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "axios": "^1.7.7",
+    "bcrypt": "^5.1.1",
+    "express": "^4.21.0",
+    "fs-extra": "^11.1.1",
+    "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "bin": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "pkg . --targets node20-win-x64,node20-linux-x64 --out-path dist"
+  },
+  "overrides": {
+    "tar": "^7.1.0"
+  },
+  "pkg": {
+    "assets": [
+      "*.html",
+      "public/**/*"
+    ]
+  }
+}

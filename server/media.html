@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Médiathèque</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; }
+        header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
+        .container { flex: 1; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        .filters { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
+        .filters label { font-size: 14px; }
+        .filters select, .filters input { padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #34495e; color: white; }
+        .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; }
+        .media-item { background: #34495e; border-radius: 8px; overflow: hidden; text-align: center; padding: 10px; position: relative; }
+        .media-item img, .media-item video { max-width: 100%; height: 100px; object-fit: contain; display: block; margin: 0 auto 10px auto; }
+        .media-item .filename { font-size: 12px; word-break: break-all; margin-bottom: 5px; }
+        .media-item .meta { font-size: 10px; color: #bdc3c7; }
+        .media-item .delete-btn { position: absolute; top: 5px; right: 5px; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .upload-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #34495e; }
+        .upload-section input[type="file"] { margin-right: 10px; }
+        .upload-section button { padding: 8px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/" style="color: #bdc3c7; text-decoration: none;">&larr; Retour</a>
+        <h2>Médiathèque</h2>
+        <div></div>
+    </header>
+
+    <div class="container">
+        <div class="filters">
+            <label for="filter-type">Type:</label>
+            <select id="filter-type" onchange="filterMedia()">
+                <option value="">Tous</option>
+                <option value="image">Image</option>
+                <option value="video">Vidéo</option>
+                <option value="audio">Audio</option>
+                <option value="html">HTML / Web</option>
+                <option value="other">Autre</option>
+            </select>
+
+            <label for="filter-user">Utilisateur:</label>
+            <select id="filter-user" onchange="filterMedia()">
+                <option value="">Tous</option>
+                <!-- Options will be populated dynamically -->
+            </select>
+
+            <label for="sort-by">Trier par:</label>
+            <select id="sort-by" onchange="filterMedia()">
+                <option value="uploadDate-desc">Date (plus récent)</option>
+                <option value="uploadDate-asc">Date (plus ancien)</option>
+                <option value="filename-asc">Nom (A-Z)</option>
+                <option value="filename-desc">Nom (Z-A)</option>
+            </select>
+        </div>
+
+        <div class="media-grid" id="media-grid">
+            <!-- Media items will be rendered here -->
+        </div>
+
+        <div class="upload-section">
+            <h3>Télécharger un média</h3>
+            <input type="file" id="media-upload-input">
+            <button onclick="uploadMedia()">Télécharger</button>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('pidyn_token');
+        if (!token) window.location.href = '/';
+        const PREVIEW_AUTH = '?apiKey=ma_cle_secrete_123';
+
+        let allMedia = [];
+        let allUsers = [];
+
+        async function init() {
+            await fetchMedia();
+            await fetchUsers();
+            populateUserFilter();
+            filterMedia();
+        }
+
+        async function fetchMedia() {
+            const res = await fetch('/api/admin/media', { headers: { 'x-access-token': token } });
+            allMedia = await res.json();
+        }
+
+        async function fetchUsers() {
+            const res = await fetch('/api/admin/users', { headers: { 'x-access-token': token } });
+            allUsers = await res.json();
+        }
+
+        function populateUserFilter() {
+            const select = document.getElementById('filter-user');
+            select.innerHTML = '<option value="">Tous</option>';
+            allUsers.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.username;
+                option.textContent = user.username;
+                select.appendChild(option);
+            });
+        }
+
+        function filterMedia() {
+            let filtered = [...allMedia];
+
+            // Pour les diaporamas Sozi (ZIP), on ne garde que le fichier HTML dans la vue
+            const dirsWithHtml = new Set(allMedia.filter(m => m.type === 'html' && m.parentZipDir).map(m => m.parentZipDir));
+            filtered = filtered.filter(m => !m.parentZipDir || !dirsWithHtml.has(m.parentZipDir) || m.type === 'html');
+
+            const type = document.getElementById('filter-type').value;
+            const user = document.getElementById('filter-user').value;
+            const sortBy = document.getElementById('sort-by').value;
+
+            if (type) filtered = filtered.filter(item => item.type === type);
+            if (user) filtered = filtered.filter(item => item.uploadedBy === user);
+
+            filtered.sort((a, b) => {
+                if (sortBy === 'uploadDate-desc') return new Date(b.uploadDate) - new Date(a.uploadDate);
+                if (sortBy === 'uploadDate-asc') return new Date(a.uploadDate) - new Date(b.uploadDate);
+                if (sortBy === 'filename-asc') return a.filename.localeCompare(b.filename);
+                if (sortBy === 'filename-desc') return b.filename.localeCompare(a.filename);
+                return 0;
+            });
+
+            renderMedia(filtered);
+        }
+
+        function renderMedia(mediaItems) {
+            const grid = document.getElementById('media-grid');
+            grid.innerHTML = '';
+            mediaItems.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'media-item';
+                let preview = '';
+                const authenticatedUrl = item.url + PREVIEW_AUTH;
+                if (item.type === 'image') {
+                    preview = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
+                } else if (item.type === 'video') {
+                    preview = `<video src="${authenticatedUrl}" muted onmouseover="this.play()" onmouseout="this.pause()"></video>`;
+                } else if (item.type === 'audio') {
+                    preview = `<audio src="${authenticatedUrl}" controls></audio>`;
+                } else if (item.type === 'html') {
+                    preview = `<iframe src="${authenticatedUrl}" style="width:100%; height:100px; border:none;"></iframe>`;
+                } else if (item.type === 'svg') {
+                    preview = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
+                } else if (item.type === 'json') {
+                    preview = `<span>JSON</span>`;
+                } else {
+                    preview = `<span>${item.type}</span>`;
+                }
+                div.innerHTML = `
+                    <button class="delete-btn" onclick="deleteMedia('${item.id}')">×</button>
+                    ${preview}
+                    <div class="filename">${item.filename}</div>
+                    <div class="meta">Par: ${item.uploadedBy}</div>
+                    <div class="meta">Le: ${new Date(item.uploadDate).toLocaleDateString()}</div>
+                `;
+                grid.appendChild(div);
+            });
+        }
+
+        async function uploadMedia() {
+            const input = document.getElementById('media-upload-input');
+            if (!input.files.length) {
+                alert('Veuillez sélectionner un fichier.');
+                return;
+            }
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch('/api/admin/upload', {
+                method: 'POST',
+                headers: { 'x-access-token': token },
+                body: formData
+            });
+
+            if (res.ok) {
+                alert('Fichier téléchargé avec succès!');
+                input.value = ''; // Clear the input
+                await init(); // Re-fetch and re-render media
+            } else {
+                const errorText = await res.text();
+                alert('Erreur lors du téléchargement : ' + errorText);
+            }
+        }
+
+        async function deleteMedia(id) {
+            if (!confirm('Êtes-vous sûr de vouloir supprimer ce média ?')) return;
+
+            const res = await fetch(`/api/admin/media/${id}`, {
+                method: 'DELETE',
+                headers: { 'x-access-token': token }
+            });
+
+            if (res.ok) {
+                alert('Média supprimé avec succès!');
+                await init();
+            } else {
+                alert('Erreur lors de la suppression du média.');
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
