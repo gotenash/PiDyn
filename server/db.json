@@ -1,0 +1,162 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "password": "$2b$10$MKW8T87pXkb5.XQosM82Pu1HaeSE8p2mcjz0/CBy35LE22EjdWz5m",
+      "role": "admin"
+    },
+    {
+      "username": "editeur",
+      "password": "$2b$10$/7B.I4hPf54091AgiIGz3OiHQtDdfVbxEokn3sjSqZ0GmVnSDr.pi",
+      "role": "editor"
+    },
+    {
+      "username": "auteur",
+      "password": "$2b$10$ROsPZfOUrhCaSzpq78jWaedPz2UE1HnucoNL9/OVLKZSLTPMCuP5e",
+      "role": "author"
+    }
+  ],
+  "playlists": {
+    "p1": {
+      "name": "Promo Eté",
+      "items": [
+        {
+          "type": "image",
+          "url": "/media/ete.jpg",
+          "duration": 5000
+        }
+      ]
+    },
+    "p2": {
+      "name": "Infos Interne",
+      "items": [
+        {
+          "type": "video",
+          "url": "/media/security.mp4",
+          "duration": 30000,
+          "zones": [
+            {
+              "x": 2,
+              "y": 4,
+              "w": 38,
+              "h": 22,
+              "type": "clock",
+              "url": "",
+              "text": "Nouvelle Horloge",
+              "clockFormat": "HH:mm:ss",
+              "fontFamily": "Arial, sans-serif",
+              "fontSize": 24,
+              "color": "#ffffff",
+              "textAlign": "center"
+            },
+            {
+              "x": 28,
+              "y": 46,
+              "w": 46,
+              "h": 28,
+              "type": "text",
+              "url": "",
+              "text": "Collège de Coutances",
+              "fontFamily": "Arial, sans-serif",
+              "fontSize": 24,
+              "color": "#ffffff",
+              "textAlign": "center",
+              "clockFormat": "HH:mm:ss"
+            }
+          ]
+        },
+        {
+          "duration": 5000,
+          "zones": [
+            {
+              "x": 22,
+              "y": 14,
+              "w": 56,
+              "h": 68,
+              "type": "image",
+              "url": "/media/1780837654870.jpg",
+              "text": "Nouveau Texte",
+              "clockFormat": "HH:mm:ss"
+            }
+          ]
+        }
+      ],
+      "resolution": "16/9"
+    },
+    "p_1780841483559": {
+      "name": "Collège",
+      "items": [
+        {
+          "duration": 5000,
+          "zones": [
+            {
+              "x": 26.1654,
+              "y": 22.8571,
+              "w": 46.1246,
+              "h": 50.1587,
+              "type": "text",
+              "url": "",
+              "text": "Kikooo"
+            }
+          ]
+        },
+        {
+          "duration": 5000,
+          "zones": [
+            {
+              "x": 50,
+              "y": 8,
+              "w": 46.1246,
+              "h": 66.0317,
+              "type": "video",
+              "url": "/media/1780845154458.mp4",
+              "text": ""
+            }
+          ]
+        },
+        {
+          "duration": 5000,
+          "zones": [
+            {
+              "x": 0.149999,
+              "y": 0.952381,
+              "w": 99.4211,
+              "h": 98.4127,
+              "type": "image",
+              "url": "/media/1780842215804.png",
+              "text": ""
+            },
+            {
+              "x": 12,
+              "y": 8,
+              "w": 43.733995579754286,
+              "h": 73.3333238095238,
+              "type": "image",
+              "url": "/media/1780837654870.jpg",
+              "text": ""
+            }
+          ]
+        }
+      ],
+      "backgroundColor": "#7560ee",
+      "resolution": "16/9"
+    }
+  },
+  "players": {
+    "pi-accueil-01": {
+      "name": "Ecran Accueil",
+      "manualPlaylistId": "p_1780841483559",
+      "currentPlaylistId": "p_1780841483559",
+      "lastSeen": null,
+      "status": "approved"
+    },
+    "mon-pi-accueil": {
+      "name": "Nouveau Pi (mon-pi-accueil)",
+      "manualPlaylistId": "p2",
+      "currentPlaylistId": "p2",
+      "lastSeen": "2026-06-08T07:25:34.311Z",
+      "status": "approved"
+    }
+  },
+  "schedules": []
+}

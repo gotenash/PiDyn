@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PiDyn Admin</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
+        section { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        .item-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .media-item { display: inline-block; background: #eee; padding: 5px; margin: 5px; border-radius: 4px; font-size: 0.8em; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button.secondary { background: #6c757d; }
+        #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 100; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
+        .media-thumbnail {
+            width: 80px; /* Taille fixe pour les miniatures */
+            height: 60px;
+            object-fit: contain; /* Garde le ratio et s'adapte */
+            vertical-align: middle;
+            margin-right: 5px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-overlay">
+        <h2>Connexion PiDyn</h2>
+        <input type="text" id="username" placeholder="Nom d'utilisateur">
+        <input type="password" id="password" placeholder="Mot de passe">
+        <button onclick="login()">Se connecter</button>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1>Gestionnaire d'Affichage Dynamique</h1>
+        <div>
+            <button id="users-admin-btn" style="display: none; background: #6f42c1;" onclick="window.location.href='/users'">Gestion Utilisateurs</button>
+            <button class="secondary" onclick="logout()">Déconnexion</button>
+        </div>
+    </div>
+
+    <section id="players-section" style="display: none;">
+        <h2>Écrans Connectés</h2>
+        <div id="players-list"></div>
+    </section>
+
+    <section>
+        <h2>Médiathèque</h2>
+        <input type="file" id="upload-input">
+        <button onclick="uploadFile()">Uploader un fichier</button>
+        <div id="media-list" style="margin-top: 10px;"></div>
+    </section>
+
+    <section>
+        <h2>Mes Diaporamas</h2>
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+            <button onclick="window.location.href='/editor'">+ Créer un nouveau diaporama</button>
+            <button class="secondary" onclick="document.getElementById('pptx-input').click()">Import PowerPoint (Beta)</button>
+            <input type="file" id="pptx-input" style="display:none" accept=".pptx" onchange="importPPTX(this)">
+        </div>
+        <div id="playlists-list" style="margin-top: 15px;"></div>
+    </section>
+
+    <section id="schedules-section" style="display: none;">
+        <h2>Agenda des Diaporamas</h2>
+        <div style="display: flex; gap: 10px; align-items: end; margin-bottom: 15px;">
+            <input type="hidden" id="schedule-id">
+            <div>
+                <label>Afficheur</label><br>
+                <select id="schedule-device" style="width: 150px;"></select>
+            </div>
+            <div>
+                <label>Diaporama</label><br>
+                <select id="schedule-playlist" style="width: 150px;"></select>
+            </div>
+            <div>
+                <label>Début</label><br>
+                <input type="datetime-local" id="schedule-start">
+            </div>
+            <div>
+                <label>Fin</label><br>
+                <input type="datetime-local" id="schedule-end">
+            </div>
+            <button onclick="saveSchedule()">Enregistrer la planification</button>
+            <button class="secondary" onclick="resetScheduleForm()">Annuler</button>
+        </div>
+        <div id="schedules-list"></div>
+    </section>
+
+    <script>
+        let token = localStorage.getItem('pidyn_token');
+        let role = localStorage.getItem('pidyn_role');
+
+        async function login() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                token = data.token;
+                role = data.role;
+                localStorage.setItem('pidyn_token', token);
+                localStorage.setItem('pidyn_role', role);
+                checkAuth();
+            } else alert('Identifiants incorrects');
+        }
+
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            location.reload();
+        }
+
+        function checkAuth() {
+            if (token) {
+                document.getElementById('login-overlay').style.display = 'none';
+                // Seuls Admin et Editeur voient la gestion des écrans
+                if (role === 'admin' || role === 'editor') document.getElementById('players-section').style.display = 'block';
+                // Seuls Admin et Editeur voient la gestion des agendas
+                if (role === 'admin' || role === 'editor') document.getElementById('schedules-section').style.display = 'block';
+                // Seul l'admin voit le bouton de gestion des utilisateurs
+                if (role === 'admin') document.getElementById('users-admin-btn').style.display = 'inline-block';
+                load();
+            }
+        }
+
+        async function load() {
+            const headers = { 'x-access-token': token };
+            const res = await fetch('/api/admin/data', { headers });
+            if (res.status === 403) return logout();
+            const { players, playlists } = await res.json();
+
+            // Afficher la liste des diaporamas
+            // ... (le code existant pour les playlists reste inchangé)
+
+            // Afficher la liste des players
+            let html = '<table border="1"><tr><th>Nom</th><th>ID</th><th>Statut</th><th>Playlist</th><th>Dernière vue</th><th>Action</th></tr>';
+            for (let id in players) {
+                const player = players[id];
+                const playlistName = player.currentPlaylistId ? (playlists[player.currentPlaylistId] ? playlists[player.currentPlaylistId].name : 'Inconnue') : 'Aucune';
+                const lastSeen = player.lastSeen ? new Date(player.lastSeen).toLocaleString() : 'Jamais';
+                html += `<tr>
+                    <td>${player.name}</td>
+                    <td>${id}</td>
+                    <td>${player.status === 'pending' ? 'En attente' : 'Approuvé'}</td>
+                    <td>${playlistName}</td>
+                    <td>${lastSeen}</td>
+                    <td>`;
+                if (player.status === 'pending') {
+                    html += `<button onclick="approvePlayer('${id}')">Approuver</button>`;
+                }
+                html += `<button style="background:#dc3545" onclick="removePlayer('${id}')">Supprimer</button>`;
+                if (player.status === 'approved') {
+                    html += `<select onchange="assign('${id}', this.value)">
+                                <option value="">Manuel: Aucune</option>
+                                ${Object.keys(playlists).map(pId => `<option value="${pId}" ${player.manualPlaylistId === pId ? 'selected' : ''}>Manuel: ${playlists[pId].name}</option>`).join('')}
+                            </select>`;
+                }
+                html += `</td></tr>`;
+            }
+            document.getElementById('players-list').innerHTML = html + '</table>';
+
+            // Afficher la liste des diaporamas (code existant)
+            const plList = document.getElementById('playlists-list'); 
+            plList.innerHTML = Object.keys(playlists).map(id => `
+                <div style="background:#eee; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                    <span><strong>${playlists[id].name}</strong> (${playlists[id].items.length} éléments)</span>
+                    <div style="display:flex; gap:5px;">
+                        <button class="secondary" onclick="window.location.href='/editor?id=${id}'">Modifier</button>
+                        <button style="background:#dc3545" onclick="deletePlaylist('${id}')">Supprimer</button>
+                    </div>
+                </div>
+            `).join('');
+
+            // Charger les fichiers média disponibles sur le serveur
+            const mediaRes = await fetch('/api/admin/media', { headers });
+            const files = await mediaRes.json();
+            const PREVIEW_AUTH = '?apiKey=ma_cle_secrete_123'; // Clé pour l'aperçu
+            const mediaList = document.getElementById('media-list');
+            mediaList.innerHTML = files.map(f => {
+                const fileUrl = `/media/${f}`;
+                let thumbnailHtml = '';
+                if (f.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+                    thumbnailHtml = `<img src="${fileUrl}${PREVIEW_AUTH}" class="media-thumbnail">`;
+                } else if (f.match(/\.(mp4|webm|ogg)$/i)) {
+                    thumbnailHtml = `<video src="${fileUrl}${PREVIEW_AUTH}" class="media-thumbnail" muted></video>`;
+                }
+                return `<span class="media-item">${thumbnailHtml}${fileUrl} <button class="secondary" onclick="copyUrl('${fileUrl}')" style="padding:2px 5px; font-size:10px;">Copier l'URL</button></span>`;
+            }).join('');
+        }
+
+        // Fonctions pour la gestion des agendas
+        async function loadSchedules() {
+            const headers = { 'x-access-token': token };
+            const res = await fetch('/api/admin/schedules', { headers });
+            if (res.status === 403) return logout();
+            const schedules = await res.json();
+
+            const playersRes = await fetch('/api/admin/data', { headers });
+            const { players, playlists } = await playersRes.json();
+
+            // Populate player and playlist dropdowns for the schedule form
+            const scheduleDeviceSelect = document.getElementById('schedule-device');
+            const schedulePlaylistSelect = document.getElementById('schedule-playlist');
+            scheduleDeviceSelect.innerHTML = Object.keys(players).map(id => `<option value="${id}">${players[id].name}</option>`).join('');
+            schedulePlaylistSelect.innerHTML = Object.keys(playlists).map(id => `<option value="${id}">${playlists[id].name}</option>`).join('');
+
+            let html = '<table border="1"><tr><th>Afficheur</th><th>Diaporama</th><th>Début</th><th>Fin</th><th>Action</th></tr>';
+            schedules.forEach(s => {
+                const deviceName = players[s.deviceId] ? players[s.deviceId].name : s.deviceId;
+                const playlistName = playlists[s.playlistId] ? playlists[s.playlistId].name : s.playlistId;
+                html += `<tr>
+                    <td>${deviceName}</td>
+                    <td>${playlistName}</td>
+                    <td>${new Date(s.startTime).toLocaleString()}</td>
+                    <td>${new Date(s.endTime).toLocaleString()}</td>
+                    <td>
+                        <button class="secondary" onclick="editSchedule('${s.id}')">Modifier</button>
+                        <button style="background:#dc3545" onclick="deleteSchedule('${s.id}')">Supprimer</button>
+                    </td>
+                </tr>`;
+            });
+            document.getElementById('schedules-list').innerHTML = html + '</table>';
+        }
+
+        function resetScheduleForm() {
+            document.getElementById('schedule-id').value = '';
+            document.getElementById('schedule-device').value = '';
+            document.getElementById('schedule-playlist').value = '';
+            document.getElementById('schedule-start').value = '';
+            document.getElementById('schedule-end').value = '';
+        }
+
+        async function saveSchedule() {
+            const id = document.getElementById('schedule-id').value;
+            const deviceId = document.getElementById('schedule-device').value;
+            const playlistId = document.getElementById('schedule-playlist').value;
+            const startTime = document.getElementById('schedule-start').value;
+            const endTime = document.getElementById('schedule-end').value;
+
+            if (!deviceId || !playlistId || !startTime || !endTime) return alert("Veuillez remplir tous les champs de planification.");
+
+            const res = await fetch('/api/admin/schedules', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ id, deviceId, playlistId, startTime, endTime })
+            });
+            if (res.ok) {
+                alert('Planification enregistrée !');
+                resetScheduleForm();
+                loadSchedules();
+            } else alert('Erreur lors de l\'enregistrement de la planification.');
+        }
+
+        async function editSchedule(id) {
+            const headers = { 'x-access-token': token };
+            const res = await fetch('/api/admin/schedules', { headers });
+            const schedules = await res.json();
+            const schedule = schedules.find(s => s.id === id);
+            if (schedule) {
+                document.getElementById('schedule-id').value = schedule.id;
+                document.getElementById('schedule-device').value = schedule.deviceId;
+                document.getElementById('schedule-playlist').value = schedule.playlistId;
+                document.getElementById('schedule-start').value = schedule.startTime.substring(0, 16); // Format datetime-local
+                document.getElementById('schedule-end').value = schedule.endTime.substring(0, 16); // Format datetime-local
+            }
+        }
+
+        async function deleteSchedule(id) {
+            if (!confirm('Voulez-vous vraiment supprimer cette planification ?')) return;
+            const res = await fetch(`/api/admin/schedules/${id}`, {
+                method: 'DELETE',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Planification supprimée !');
+                loadSchedules();
+            } else alert('Erreur lors de la suppression de la planification.');
+        }
+
+        async function approvePlayer(deviceId) {
+            if (!confirm(`Voulez-vous vraiment approuver l'afficheur ${deviceId} ?`)) return;
+            const res = await fetch(`/api/admin/players/approve/${deviceId}`, {
+                method: 'POST',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Afficheur approuvé !');
+                load();
+            } else {
+                alert('Erreur lors de l\'approbation.');
+            }
+        }
+
+        async function removePlayer(deviceId) {
+            if (!confirm(`Voulez-vous vraiment supprimer l'afficheur ${deviceId} ?`)) return;
+            const res = await fetch(`/api/admin/players/${deviceId}`, {
+                method: 'DELETE',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Afficheur supprimé !');
+                load();
+            } else {
+                alert('Erreur lors de la suppression.');
+            }
+        }
+
+        async function uploadFile() {
+            const input = document.getElementById('upload-input');
+            if (!input.files[0]) return alert("Veuillez choisir un fichier.");
+
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+
+            const res = await fetch('/api/admin/upload', {
+                method: 'POST',
+                headers: { 'x-access-token': token },
+                body: formData
+            });
+            
+            if (res.ok) {
+                alert('Fichier uploadé avec succès !');
+                input.value = '';
+                load(); // Rafraîchir la liste
+            } else {
+                const errorText = await res.text();
+                alert('Erreur lors de l\'envoi : ' + errorText);
+            }
+        }
+
+        async function deletePlaylist(id) {
+            if (!confirm('Voulez-vous vraiment supprimer ce diaporama ?')) return;
+            const res = await fetch(`/api/admin/playlists/${id}`, {
+                method: 'DELETE',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) {
+                alert('Diaporama supprimé !');
+                load();
+            } else {
+                alert('Erreur lors de la suppression.');
+            }
+        }
+
+        async function importPPTX(input) {
+            if (!input.files[0]) return;
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+            
+            alert("L'import est en cours... cela peut prendre du temps selon le nombre de slides.");
+            const res = await fetch('/api/admin/import-pptx', {
+                method: 'POST',
+                headers: { 'x-access-token': token },
+                body: formData
+            });
+            if (res.ok) {
+                alert("Importation réussie ! Un nouveau diaporama a été créé.");
+                load();
+            }
+        }
+
+        function copyUrl(url) {
+            navigator.clipboard.writeText(url).then(() => {
+                alert('URL copiée ! Vous pouvez maintenant la coller dans le champ URL d\'un item.');
+            });
+        }
+
+        // La fonction load() principale doit maintenant appeler loadSchedules()
+        async function assign(deviceId, playlistId) {
+            // Vérifier le statut du player avant d'assigner
+            const playerStatusRes = await fetch('/api/admin/data', { headers: { 'x-access-token': token } });
+            const playerData = await playerStatusRes.json();
+            const player = playerData.players[deviceId];
+            if (!player || player.status !== 'approved') {
+                alert('Impossible d\'affecter une playlist à un afficheur non approuvé.');
+                return;
+            }
+
+            await fetch('/api/admin/assign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ deviceId, playlistId })
+            });
+            alert('Affectation réussie !');
+            load();
+        }
+
+        checkAuth();
+    </script>
+</body>
+</html>

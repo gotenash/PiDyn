@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PiDyn - Gestion Utilisateurs</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; }
+        section { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+        input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button.danger { background: #dc3545; }
+        button.secondary { background: #6c757d; }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1>Gestion des Utilisateurs</h1>
+        <button class="secondary" onclick="window.location.href='/'">Retour Admin</button>
+    </div>
+
+    <section>
+        <h2>Ajouter / Modifier un Utilisateur</h2>
+        <div style="display: flex; gap: 10px; align-items: end;">
+            <div>
+                <label>Nom d'utilisateur</label><br>
+                <input type="text" id="user-name">
+            </div>
+            <div>
+                <label>Mot de passe</label><br>
+                <input type="password" id="user-pass">
+            </div>
+            <div>
+                <label>Rôle</label><br>
+                <select id="user-role">
+                    <option value="author">Auteur</option>
+                    <option value="editor">Editeur</option>
+                    <option value="admin">Administrateur</option>
+                </select>
+            </div>
+            <button onclick="saveUser()">Enregistrer</button>
+        </div>
+    </section>
+
+    <section>
+        <h2>Liste des Utilisateurs</h2>
+        <div id="users-list"></div>
+    </section>
+
+    <script>
+        const token = localStorage.getItem('pidyn_token');
+        const role = localStorage.getItem('pidyn_role');
+
+        if (!token || role !== 'admin') {
+            alert("Accès réservé aux administrateurs");
+            window.location.href = '/';
+        }
+
+        async function loadUsers() {
+            const res = await fetch('/api/admin/users', {
+                headers: { 'x-access-token': token }
+            });
+            if (res.status === 403) window.location.href = '/';
+            const users = await res.json();
+
+            let html = '<table><tr><th>Utilisateur</th><th>Rôle</th><th>Actions</th></tr>';
+            users.forEach(u => {
+                html += `<tr>
+                    <td>${u.username}</td>
+                    <td>${u.role}</td>
+                    <td>
+                        <button class="secondary" onclick="editUser('${u.username}', '${u.role}')">Modifier</button>
+                        ${u.username !== 'admin' ? `<button class="danger" onclick="deleteUser('${u.username}')">Supprimer</button>` : ''}
+                    </td>
+                </tr>`;
+            });
+            document.getElementById('users-list').innerHTML = html + '</table>';
+        }
+
+        function editUser(username, role) {
+            document.getElementById('user-name').value = username;
+            document.getElementById('user-role').value = role;
+            document.getElementById('user-pass').value = ''; 
+        }
+
+        async function saveUser() {
+            const username = document.getElementById('user-name').value;
+            const password = document.getElementById('user-pass').value;
+            const role = document.getElementById('user-role').value;
+
+            if (!username || !password) return alert("Veuillez remplir tous les champs");
+
+            const res = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                body: JSON.stringify({ username, password, role })
+            });
+
+            if (res.ok) {
+                alert('Utilisateur enregistré !');
+                document.getElementById('user-name').value = '';
+                document.getElementById('user-pass').value = '';
+                loadUsers();
+            } else {
+                alert('Erreur lors de l\'enregistrement');
+            }
+        }
+
+        async function deleteUser(username) {
+            if (!confirm(`Supprimer l'utilisateur ${username} ?`)) return;
+            const res = await fetch(`/api/admin/users/${username}`, {
+                method: 'DELETE',
+                headers: { 'x-access-token': token }
+            });
+            if (res.ok) loadUsers();
+        }
+
+        loadUsers();
+    </script>
+</body>
+</html>
