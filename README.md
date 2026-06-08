@@ -43,7 +43,7 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 1.  **Prerequisites:** Ensure Node.js and npm are installed on your server.
 2.  **Option A: Standard Installation:**
    ```bash
-   git clone <https://github.com/your-repo/PiDyn.git>
+   git clone https://github.com/gotenash/PiDyn.git
    cd PiDyn/client # Assuming server.js is in the client directory for this context
    ```
 3.  **Install dependencies:**
@@ -134,7 +134,7 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 1.  **Prérequis:** Assurez-vous que Node.js et npm sont installés sur votre serveur.
 2.  **Option A : Installation Standard :**
    ```bash
-   git clone <https://github.com/your-repo/PiDyn.git>
+   git clone https://github.com/gotenash/PiDyn.git
    cd PiDyn/client # En supposant que server.js se trouve dans le répertoire client pour ce contexte
    ```
 3.  **Installer les dépendances:**
