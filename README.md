@@ -13,14 +13,20 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 ## Features
 ### Server-side (Node.js)
 *   **Web-based Administration Panel:** A user-friendly interface (`admin.html`, `editor.html`, `users.html`, `player.html`) for managing all aspects of the digital signage system.
+*   **Real-time Flash Messaging:** Send instant alerts (info, warning, danger) to specific screens or all devices simultaneously.
+*   **Advanced Analytics:** Track media playback frequency and duration with visual charts (Chart.js) and a "Top 50" leaderboard.
+*   **Remote Device Control:** Take screenshots, force synchronization, clear local cache, or restart the client service directly from the dashboard.
+*   **Group Management:** Organize players by location or category to assign content or trigger actions at scale.
 *   **User Management:** Create and manage users with different roles (admin, editor, author) for granular access control. Passwords are securely hashed using bcrypt.
 *   **Playlist Management:** Create, edit, and delete dynamic playlists composed of various media types (images, videos).
 *   **Media Management:** Upload and organize media files (images, videos) to be used in playlists.
 *   **Player Management:** Register, approve, and assign specific playlists to individual Raspberry Pi display units. Monitor their status (last seen).
 *   **Content Scheduling:** Implement time-based scheduling to automatically switch playlists on players at predefined times.
 *   **Real-time Updates:** Utilizes Socket.IO to push instant playlist changes and updates to connected Raspberry Pi clients.
-*   **Data Persistence:** Stores all configuration, user data, playlists, and schedules in a `db.json` file.
+*   **Maintenance & Backup:** Built-in ZIP backup and restoration tool for both the SQLite database and media files.
+*   **Data Persistence:** Stores all configuration, user data, playlists, and schedules in a SQLite database (`pidyn.sqlite`).
 *   **Authentication:** API key-based authentication for Raspberry Pi clients and token-based authentication for the administration panel.
+*   **System Logs:** Automated timestamps on all server and client logs for easier troubleshooting.
 *   **Standalone Executable:** Capability to package the server as a single `.exe` (Windows) or binary (Linux) using `pkg` for easier distribution.
 *   **PPTX Import (Planned):** Suggested structure for importing PowerPoint presentations and converting slides to images for playlists.
 ### Client-side (Raspberry Pi)
@@ -29,6 +35,7 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 *   **Automatic Boot:** Automatic configuration of LightDM and Openbox to start the player immediately upon power-up.
 *   **Systemd Service:** Sets up `sync-engine.js` as a systemd service for automatic startup and background operation.
 *   **Real-time Playlist Synchronization:** The `sync-engine.js` client connects to the server via Socket.IO to receive playlist updates.
+*   **Enhanced Monitoring:** Reports network status (IP, MAC), WiFi details (SSID, Signal Quality), and playback progress to the CMS.
 *   **Media Synchronization:** Automatically downloads and caches media files locally from the server, ensuring smooth playback and offline capability.
 *   **Configurable:** Reads device-specific configuration (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) from `/boot/setup.txt`.
 
@@ -36,7 +43,7 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 *   **Backend:** Node.js, Express.js, Socket.IO, fs-extra, multer, bcrypt, axios
 *   **Frontend:** HTML, CSS, JavaScript (for admin UI)
 *   **Client (Raspberry Pi):** Node.js, Socket.IO Client, axios, Chromium, X11, LightDM, Openbox, Systemd, Bash
-*   **Database:** JSON file (`db.json`) for simple data persistence
+*   **Database:** SQLite for robust data persistence
 
 ## Getting Started
 ### Server Setup
@@ -104,14 +111,20 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 ## Fonctionnalités
 ### Côté Serveur (Node.js)
 *   **Panneau d'Administration Web:** Une interface conviviale (`admin.html`, `editor.html`, `users.html`, `player.html`) pour gérer tous les aspects du système d'affichage dynamique.
+*   **Messages Flash en Temps Réel :** Envoyez des alertes instantanées (info, attention, danger) à des écrans spécifiques ou à tout le parc.
+*   **Analyses et Statistiques :** Suivez la fréquence et la durée de diffusion des médias avec des graphiques visuels et un classement "Top 50".
+*   **Contrôle à Distance :** Prenez des captures d'écran, forcez la synchronisation, videz le cache ou redémarrez le service client à distance.
+*   **Gestion des Groupes :** Organisez les afficheurs par emplacement ou catégorie pour des actions groupées.
 *   **Gestion des Utilisateurs:** Créez et gérez des utilisateurs avec différents rôles (administrateur, éditeur, auteur) pour un contrôle d'accès granulaire. Les mots de passe sont hachés de manière sécurisée à l'aide de bcrypt.
 *   **Gestion des Playlists:** Créez, modifiez et supprimez des playlists dynamiques composées de divers types de médias (images, vidéos).
 *   **Gestion des Médias:** Téléchargez et organisez les fichiers multimédias (images, vidéos) à utiliser dans les playlists.
 *   **Gestion des Lecteurs (Players):** Enregistrez, approuvez et attribuez des playlists spécifiques à des unités d'affichage Raspberry Pi individuelles. Surveillez leur statut (dernière connexion).
 *   **Planification de Contenu:** Mettez en œuvre une planification basée sur le temps pour changer automatiquement les playlists sur les lecteurs à des heures prédéfinies.
 *   **Mises à Jour en Temps Réel:** Utilise Socket.IO pour envoyer instantanément les modifications et les mises à jour des playlists aux clients Raspberry Pi connectés.
-*   **Persistance des Données:** Stocke toutes les configurations, les données utilisateur, les playlists et les planifications dans un fichier `db.json`.
+*   **Maintenance et Sauvegarde :** Outil intégré de sauvegarde et restauration au format ZIP (Base de données + Médias).
+*   **Persistance des Données:** Stocke toutes les configurations, les données utilisateur, les playlists et les planifications dans une base de données SQLite (`pidyn.sqlite`).
 *   **Authentification:** Authentification par clé API pour les clients Raspberry Pi et authentification par jeton pour le panneau d'administration.
+*   **Logs Système :** Horodatage automatique des logs serveur et client pour faciliter le dépannage.
 *   **Exécutable Autonome :** Possibilité de packager le serveur en un seul fichier `.exe` (Windows) ou binaire (Linux) via `pkg` pour une distribution simplifiée.
 *   **Import PPTX (Prévu):** Structure suggérée pour l'importation de présentations PowerPoint et la conversion des diapositives en images pour les playlists.
 ### Côté Client (Raspberry Pi)
@@ -120,6 +133,7 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 *   **Démarrage Automatique :** Configuration automatique de LightDM et Openbox pour lancer le lecteur dès la mise sous tension.
 *   **Service Systemd:** Configure `sync-engine.js` en tant que service systemd pour un démarrage automatique et un fonctionnement en arrière-plan.
 *   **Synchronisation des Playlists en Temps Réel:** Le client `sync-engine.js` se connecte au serveur via Socket.IO pour recevoir les mises à jour des playlists.
+*   **Surveillance Améliorée :** Remontée des infos réseau (IP, MAC), du WiFi (SSID, Signal) et de la progression des téléchargements.
 *   **Synchronisation des Médias:** Télécharge et met en cache automatiquement les fichiers multimédias localement depuis le serveur, assurant une lecture fluide et une capacité hors ligne.
 *   **Configurable:** Lit la configuration spécifique à l'appareil (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) à partir de `/boot/setup.txt`.
 
@@ -127,7 +141,7 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 *   **Backend:** Node.js, Express.js, Socket.IO, fs-extra, multer, bcrypt, axios
 *   **Frontend:** HTML, CSS, JavaScript (pour l'interface d'administration)
 *   **Client (Raspberry Pi):** Node.js, Client Socket.IO, axios, Chromium, X11, LightDM, Openbox, Systemd, Bash
-*   **Base de Données:** Fichier JSON (`db.json`) pour une persistance simple des données
+*   **Base de Données:** SQLite pour une persistance robuste des données
 
 ## Démarrage Rapide
 ### Configuration du Serveur

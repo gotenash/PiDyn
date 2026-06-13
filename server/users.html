@@ -59,8 +59,8 @@
         }
 
         async function loadUsers() {
-            const res = await fetch('/api/admin/users', {
-                headers: { 'x-access-token': token }
+            const res = await fetch('/api/admin/users', { //
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.status === 403) window.location.href = '/';
             const users = await res.json();
@@ -94,7 +94,7 @@
 
             const res = await fetch('/api/admin/users', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ username, password, role })
             });
 
@@ -111,8 +111,8 @@
         async function deleteUser(username) {
             if (!confirm(`Supprimer l'utilisateur ${username} ?`)) return;
             const res = await fetch(`/api/admin/users/${username}`, {
-                method: 'DELETE',
-                headers: { 'x-access-token': token }
+                method: 'DELETE', //
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) loadUsers();
         }

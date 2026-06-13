@@ -59,7 +59,7 @@ if ! command -v node &> /dev/null; then
 fi
 
 # Installer Chromium, X11 et un gestionnaire de fenêtres minimal (Openbox + LightDM)
-sudo apt-get install -y xserver-xorg x11-xserver-utils xinit lightdm openbox chromium unclutter \
+sudo apt-get install -y xserver-xorg x11-xserver-utils xinit lightdm openbox chromium unclutter wireless-tools \
     fonts-noto fonts-liberation fonts-roboto || error_exit "Échec de l'installation des composants graphiques."
 
 # 3b. Installation de polices personnalisées depuis la partition boot
@@ -152,7 +152,7 @@ EOF
 
 log_message "Configuration du démarrage automatique sur le bureau (Autologin)..."
 log_message "Désactivation de la mise en veille système (raspi-config)..."
-sudo raspi-config nonint do_blanking 1
+sudo raspi-config nonint do_blanking 0
 
 sudo systemctl set-default graphical.target
 sudo raspi-config nonint do_boot_behaviour B4 || log_message "Avertissement : Impossible de configurer l'autologin via raspi-config."

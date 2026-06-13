@@ -44,10 +44,11 @@
               "url": "",
               "text": "Nouvelle Horloge",
               "clockFormat": "HH:mm:ss",
-              "fontFamily": "Arial, sans-serif",
+              "fontFamily": "Verdana, sans-serif",
               "fontSize": 24,
-              "color": "#ffffff",
-              "textAlign": "center"
+              "color": "#33098a",
+              "textAlign": "center",
+              "fontUrl": null
             },
             {
               "x": 28,
@@ -57,11 +58,12 @@
               "type": "text",
               "url": "",
               "text": "Collège de Coutances",
-              "fontFamily": "Arial, sans-serif",
-              "fontSize": 24,
+              "fontFamily": "font-m_1780954287247",
+              "fontSize": 48,
               "color": "#000000",
               "textAlign": "center",
-              "clockFormat": "HH:mm:ss"
+              "clockFormat": "HH:mm:ss",
+              "fontUrl": "/media/1780954287242.otf"
             }
           ]
         },
@@ -82,6 +84,7 @@
           "backgroundColor": "#ffffff"
         }
       ],
+      "backgroundUrl": "/media/1781027455882.png",
       "backgroundColor": "#ffffff",
       "resolution": "16/9"
     }
@@ -91,10 +94,15 @@
       "name": "Nouveau Pi (mon-pi-accueil)",
       "manualPlaylistId": "p2",
       "currentPlaylistId": "p2",
-      "lastSeen": "2026-06-08T20:53:49.692Z",
+      "lastSeen": "2026-06-09T18:06:05.727Z",
       "status": "approved",
       "ip": "192.168.1.196",
-      "mac": "b8:27:eb:4e:4c:ea"
+      "mac": "b8:27:eb:4e:4c:ea",
+      "currentSequenceId": null,
+      "currentSequenceIndex": null,
+      "downloadStatus": {
+        "downloading": false
+      }
     }
   },
   "schedules": [],
@@ -146,6 +154,35 @@
       "uploadedBy": "admin",
       "uploadDate": "2026-06-08T20:06:25.887Z",
       "parentZipDir": "zip_extract_1780949185853_thi_is_not"
+    },
+    {
+      "id": "m_1780953430542",
+      "filename": "VID_20250504_125843.mp4",
+      "url": "/media/1780953430388.mp4",
+      "type": "video",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T21:17:10.542Z"
+    },
+    {
+      "id": "m_1780954287247",
+      "filename": "Disneyland.otf",
+      "url": "/media/1780954287242.otf",
+      "type": "font",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-08T21:31:27.248Z"
+    },
+    {
+      "id": "m_1781027455914",
+      "filename": "Gemini_Generated_Image_roxap9roxap9roxa.png",
+      "url": "/media/1781027455882.png",
+      "type": "image",
+      "uploadedBy": "admin",
+      "uploadDate": "2026-06-09T17:50:55.914Z"
     }
-  ]
+  ],
+  "sequences": {},
+  "settings": {
+    "jwtSecret": "your_jwt_secret_key_very_secret_and_long",
+    "apiKey": "ma_cle_secrete_123"
+  }
 }

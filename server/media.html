@@ -36,6 +36,7 @@
                 <option value="video">Vidéo</option>
                 <option value="audio">Audio</option>
                 <option value="html">HTML / Web</option>
+                <option value="font">Police</option>
                 <option value="other">Autre</option>
             </select>
 
@@ -52,6 +53,11 @@
                 <option value="filename-asc">Nom (A-Z)</option>
                 <option value="filename-desc">Nom (Z-A)</option>
             </select>
+
+            <div id="font-preview-container" style="display: none; align-items: center; gap: 10px;">
+                <label for="font-preview-text">Aperçu police :</label>
+                <input type="text" id="font-preview-text" placeholder="Saisissez un texte..." oninput="updateFontPreviews()" value="AaBbYy 123">
+            </div>
         </div>
 
         <div class="media-grid" id="media-grid">
@@ -81,12 +87,12 @@
         }
 
         async function fetchMedia() {
-            const res = await fetch('/api/admin/media', { headers: { 'x-access-token': token } });
+            const res = await fetch('/api/admin/media', { headers: { 'Authorization': `Bearer ${token}` } });
             allMedia = await res.json();
         }
 
         async function fetchUsers() {
-            const res = await fetch('/api/admin/users', { headers: { 'x-access-token': token } });
+            const res = await fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
             allUsers = await res.json();
         }
 
@@ -115,6 +121,9 @@
             if (type) filtered = filtered.filter(item => item.type === type);
             if (user) filtered = filtered.filter(item => item.uploadedBy === user);
 
+            // Afficher le champ de texte personnalisé si on filtre par police ou si "Tous" est sélectionné
+            document.getElementById('font-preview-container').style.display = (!type || type === 'font') ? 'flex' : 'none';
+
             filtered.sort((a, b) => {
                 if (sortBy === 'uploadDate-desc') return new Date(b.uploadDate) - new Date(a.uploadDate);
                 if (sortBy === 'uploadDate-asc') return new Date(a.uploadDate) - new Date(b.uploadDate);
@@ -126,9 +135,18 @@
             renderMedia(filtered);
         }
 
+        function updateFontPreviews() {
+            const previewText = document.getElementById('font-preview-text').value || "AaBbYy 123";
+            document.querySelectorAll('.font-preview-box').forEach(el => {
+                el.innerText = previewText;
+            });
+        }
+
         function renderMedia(mediaItems) {
             const grid = document.getElementById('media-grid');
             grid.innerHTML = '';
+            const previewText = document.getElementById('font-preview-text').value || "AaBbYy 123";
+
             mediaItems.forEach(item => {
                 const div = document.createElement('div');
                 div.className = 'media-item';
@@ -144,6 +162,15 @@
                     preview = `<iframe src="${authenticatedUrl}" style="width:100%; height:100px; border:none;"></iframe>`;
                 } else if (item.type === 'svg') {
                     preview = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
+                } else if (item.type === 'font') {
+                    const styleId = `preview-font-${item.id}`;
+                    if (!document.getElementById(styleId)) {
+                        const style = document.createElement('style');
+                        style.id = styleId;
+                        style.textContent = `@font-face { font-family: "font-${item.id}"; src: url("${authenticatedUrl}"); }`;
+                        document.head.appendChild(style);
+                    }
+                    preview = `<div class="font-preview-box" style="font-family: 'font-${item.id}'; font-size: 24px; height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap;">${previewText}</div>`;
                 } else if (item.type === 'json') {
                     preview = `<span>JSON</span>`;
                 } else {
@@ -172,7 +199,7 @@
 
             const res = await fetch('/api/admin/upload', {
                 method: 'POST',
-                headers: { 'x-access-token': token },
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData
             });
 
@@ -189,9 +216,9 @@
         async function deleteMedia(id) {
             if (!confirm('Êtes-vous sûr de vouloir supprimer ce média ?')) return;
 
-            const res = await fetch(`/api/admin/media/${id}`, {
+            const res = await fetch(`/api/admin/media/${id}`, { //
                 method: 'DELETE',
-                headers: { 'x-access-token': token }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (res.ok) {

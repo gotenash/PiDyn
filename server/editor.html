@@ -177,8 +177,40 @@
                         <option value="justify">Justifié</option>
                     </select>
 
-                    <label>Format de l'horloge (ex: HH:mm:ss, DD/MM/YYYY)</label>
-                    <input type="text" id="z-clock-format" oninput="updateZone()" value="HH:mm:ss">
+                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; margin-top:10px;">
+                        <input type="checkbox" id="z-marquee" onchange="updateZone()" style="width:auto; margin:0;">
+                        Texte défilant (Marquee)
+                    </label>
+                </div>
+
+                <label>Animation d'entrée</label>
+                <div style="display: flex; gap: 5px;">
+                    <select id="z-anim-in" onchange="updateZone()" style="flex: 2;">
+                        <option value="none">Aucune</option>
+                        <option value="fade-in">Fondu</option>
+                        <option value="slide-top">Haut</option>
+                        <option value="slide-bottom">Bas</option>
+                        <option value="slide-left">Gauche</option>
+                        <option value="slide-right">Droite</option>
+                        <option value="zoom-in">Zoom</option>
+                    </select>
+                    <input type="number" id="z-anim-in-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0;" title="Durée (ms)">
+                </div>
+
+                <label>Animation de sortie</label>
+                <div style="display: flex; gap: 5px;">
+                    <select id="z-anim-out" onchange="updateZone()" style="flex: 2;">
+                        <option value="none">Aucune</option>
+                        <option value="fade-out">Fondu</option>
+                        <option value="zoom-out">Zoom Arrière</option>
+                    </select>
+                    <input type="number" id="z-anim-out-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0;" title="Durée (ms)">
+                </div>
+
+                    <div id="z-clock-group" style="display: none;">
+                        <label>Format de l'horloge (ex: HH:mm:ss, jj/MM/aaaa)</label>
+                        <input type="text" id="z-clock-format" oninput="updateZone()" value="HH:mm:ss">
+                    </div>
                 </div>
 
                 <label>Ordre des couches</label>
@@ -226,12 +258,12 @@
             const headers = { 'x-access-token': token };
             
             // Charger la médiathèque
-            const mediaRes = await fetch('/api/admin/media', { headers });
+            const mediaRes = await fetch('/api/admin/media', { headers: { 'Authorization': `Bearer ${token}` } });
             availableMedia = await mediaRes.json();
             populateMediaSelects();
 
             if (playlistId) {
-                const res = await fetch('/api/admin/data', { headers });
+                const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
                 const data = await res.json();
                 if (data.playlists[playlistId]) {
                     playlistData = data.playlists[playlistId];
@@ -252,6 +284,28 @@
             document.getElementById('global-bg').innerHTML = '<option value="">Aucun / Manuel</option>' + 
                 images.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
             
+            // Ajouter les polices personnalisées au menu déroulant
+            const fontSelect = document.getElementById('z-font-family');
+            const customFonts = availableMedia.filter(m => m.type === 'font');
+            customFonts.forEach(m => {
+                const fontName = `font-${m.id}`; // Nom CSS sécurisé
+                const styleId = `font-style-${m.id}`;
+                if (!document.getElementById(styleId)) {
+                    const style = document.createElement('style');
+                    style.id = styleId;
+                    style.textContent = `@font-face { font-family: "${fontName}"; src: url("${m.url}${PREVIEW_AUTH}"); }`;
+                    document.head.appendChild(style);
+                }
+                
+                if (!Array.from(fontSelect.options).some(opt => opt.value === fontName)) {
+                    const opt = document.createElement('option');
+                    opt.value = fontName;
+                    opt.textContent = m.filename;
+                    opt.dataset.url = m.url;
+                    fontSelect.appendChild(opt);
+                }
+            });
+
             // Initialisation du select de zone (sera filtré dynamiquement par type)
             populateMediaSelectsForZone(null);
         }
@@ -389,17 +443,36 @@
             const bgColor = (item && item.backgroundColor) ? item.backgroundColor : (playlistData.backgroundColor || 'black');
             screen.style.backgroundColor = bgColor;
             
-            screen.innerHTML = playlistData.backgroundUrl ? `<img src="${playlistData.backgroundUrl}${PREVIEW_AUTH}" class="bg-layer">` : '';
+            // Gérer le calque de fond sans tout effacer
+            let bgLayer = screen.querySelector('.bg-layer');
+            if (playlistData.backgroundUrl) {
+                if (!bgLayer) {
+                    bgLayer = document.createElement('img');
+                    bgLayer.className = 'bg-layer';
+                    screen.prepend(bgLayer);
+                }
+                bgLayer.src = playlistData.backgroundUrl + PREVIEW_AUTH;
+                bgLayer.style.display = 'block';
+            } else if (bgLayer) {
+                bgLayer.style.display = 'none';
+            }
             
-            if (selectedIndex === -1) return;
+            if (selectedIndex === -1) {
+                document.querySelectorAll('.screen-mockup .zone').forEach(z => z.remove());
+                return;
+            }
+
+            // Supprimer les zones qui ne sont plus dans les données
+            const currentZoneIds = (item.zones || []).map((_, i) => `zone-render-${i}`);
+            document.querySelectorAll('.screen-mockup .zone').forEach(z => {
+                if (!currentZoneIds.includes(z.id)) z.remove();
+            });
 
             if (item.zones) {
                 item.zones.forEach((zone, idx) => {
                     const zoneId = `zone-render-${idx}`;
                     let div = document.getElementById(zoneId);
                     
-                    // Si la zone n'existe pas ou si on n'est pas en train de manipuler la souris, on crée/recréée
-                    // On évite de recréer l'innerHTML des iframes/vidéos pendant le déplacement pour éviter le clignotement
                     const isInteracting = (mode === 'moving' || mode === 'resizing') && selectedZoneIndex === idx;
 
                     if (!div) {
@@ -415,40 +488,62 @@
                     div.style.height = zone.h + '%';
                     div.onmousedown = (e) => startMoving(e, idx);
 
-                    // On ne met à jour le contenu interne que si on ne déplace pas la zone (performance + stabilité iframe)
-                    if (!isInteracting || div.innerHTML === '') {
-                        if (zone.type === 'text') div.innerHTML = `<div style="color:${zone.color || 'white'}; font-size:${zone.fontSize || 24}px; font-family:${zone.fontFamily || 'sans-serif'}; text-align:${zone.textAlign || 'center'}; width:100%; word-wrap: break-word;">${zone.text || ''}</div>`;
-                        else if (zone.type === 'video' && zone.url) div.innerHTML = `<video src="${zone.url}${PREVIEW_AUTH}" muted loop autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
-                        else if (zone.type === 'web' && zone.url) div.innerHTML = `<iframe src="${zone.url}${PREVIEW_AUTH}" style="width:100%;height:100%;border:none;pointer-events:none;background:white;"></iframe>`;
+                    // Mise à jour du contenu interne
+                    if (!isInteracting) {
+                        // S'assurer que la règle @font-face est présente pour les polices personnalisées
+                        if (zone.fontFamily && zone.fontUrl) {
+                            const styleId = `font-${zone.fontFamily.replace(/[^a-z0-9]/gi, '-')}`;
+                            if (!document.getElementById(styleId)) {
+                                const style = document.createElement('style');
+                                style.id = styleId;
+                                style.textContent = `@font-face { font-family: "${zone.fontFamily}"; src: url("${zone.fontUrl}${PREVIEW_AUTH}"); }`;
+                                document.head.appendChild(style);
+                            }
+                        }
+
+                        if (zone.type === 'text') {
+                            div.innerHTML = `<div class="inner-content"></div>`;
+                            const inner = div.querySelector('.inner-content');
+                            inner.innerText = zone.text || '';
+                            inner.style.cssText = `width: 100%; height: 100%; display: flex; align-items: center; word-wrap: break-word; padding: 5%; box-sizing: border-box;`;
+                            inner.style.color = zone.color || 'white';
+                            inner.style.fontSize = (zone.fontSize || 24) + 'px';
+                            inner.style.textAlign = zone.textAlign || 'center';
+                            inner.style.justifyContent = zone.textAlign === 'justify' ? 'flex-start' : zone.textAlign;
+                            // Application propre de la police (le navigateur gère les guillemets automatiquement)
+                            inner.style.fontFamily = zone.fontFamily || 'sans-serif';
+                        }
+                        else if (zone.type === 'video' && zone.url) {
+                            if (!div.querySelector('video')) div.innerHTML = `<video src="${zone.url}${PREVIEW_AUTH}" muted loop autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
+                        }
+                        else if (zone.type === 'web' && zone.url) {
+                            if (!div.querySelector('iframe')) div.innerHTML = `<iframe src="${zone.url}${PREVIEW_AUTH}" style="width:100%;height:100%;border:none;pointer-events:none;background:white;"></iframe>`;
+                        }
                         else if (zone.type === 'clock') {
-                        const clockDiv = document.createElement('div');
-                        clockDiv.style.cssText = `
-                            color:${zone.color || 'white'}; 
-                            font-size:${zone.fontSize || 24}px; 
-                            font-family:${zone.fontFamily || 'sans-serif'}; 
-                            text-align:${zone.textAlign || 'center'}; 
-                            width:100%; 
-                            word-wrap: break-word;
-                        `;
-                        clockDiv.style.color = zone.color || 'white';
-                        clockDiv.style.fontSize = (zone.fontSize || 24) + 'px';
-                        clockDiv.style.fontFamily = zone.fontFamily || 'sans-serif';
-                        clockDiv.style.textAlign = zone.textAlign || 'center';
-                        clockDiv.style.width = '100%';
-                        clockDiv.innerText = formatClock(new Date(), zone.clockFormat || 'HH:mm:ss');
-                        div.appendChild(clockDiv);
-                    }
-                    else if (zone.url) div.innerHTML = `<img src="${zone.url}${PREVIEW_AUTH}">`;
+                            div.innerHTML = `<div class="clock-content"></div>`;
+                            const inner = div.querySelector('.clock-content');
+                            inner.style.cssText = `width:100%; height:100%; display:flex; align-items:center; justify-content:center;`;
+                            inner.style.color = zone.color || 'white';
+                            inner.style.fontSize = (zone.fontSize || 24) + 'px';
+                            inner.style.fontFamily = zone.fontFamily || 'sans-serif';
+                            inner.style.textAlign = zone.textAlign || 'center';
+                            inner.innerText = formatClock(new Date(), zone.clockFormat || 'HH:mm:ss');
+                        }
+                        else if (zone.url) {
+                            div.innerHTML = `<img src="${zone.url}${PREVIEW_AUTH}">`;
+                        }
                     }
                     
                     if (selectedZoneIndex === idx) {
-                        let resizer = div.querySelector('.resizer');
-                        if (!resizer) {
-                            resizer = document.createElement('div');
+                        if (!div.querySelector('.resizer')) {
+                            const resizer = document.createElement('div');
                             resizer.className = 'resizer';
                             div.appendChild(resizer);
+                            resizer.onmousedown = (e) => startResizing(e);
                         }
-                        resizer.onmousedown = (e) => startResizing(e);
+                    } else {
+                        const r = div.querySelector('.resizer');
+                        if (r) r.remove();
                     }
                     
                     let label = div.querySelector('.zone-label');
@@ -560,11 +655,22 @@
             document.getElementById('z-color').value = zone.color || '#ffffff';
             document.getElementById('z-text-align').value = zone.textAlign || 'center';
             document.getElementById('z-clock-format').value = zone.clockFormat || 'HH:mm:ss';
+            document.getElementById('z-anim-in').value = zone.animationIn || 'none';
+            document.getElementById('z-anim-in-dur').value = zone.animationInDuration || 1000;
+            document.getElementById('z-anim-out').value = zone.animationOut || 'none';
+            document.getElementById('z-anim-out-dur').value = zone.animationOutDuration || 800;
+            document.getElementById('z-marquee').checked = !!zone.isMarquee;
 
             // Afficher le bon champ (Media ou Texte) selon le type
-            document.getElementById('z-url').style.display = zone.type === 'text' ? 'none' : 'block';
-            document.getElementById('z-text').style.display = zone.type === 'text' ? 'block' : 'none';
-            document.querySelector('.text-properties').style.display = zone.type === 'text' ? 'block' : 'none';
+            const isText = zone.type === 'text';
+            const isClock = zone.type === 'clock';
+            const isMedia = ['image', 'video', 'web'].includes(zone.type);
+
+            document.getElementById('z-url').style.display = isMedia ? 'block' : 'none';
+            document.getElementById('z-text').style.display = isText ? 'block' : 'none';
+            document.querySelector('.text-properties').style.display = (isText || isClock) ? 'block' : 'none';
+            document.getElementById('z-clock-group').style.display = isClock ? 'block' : 'none';
+            document.getElementById('z-marquee').parentElement.style.display = isText ? 'flex' : 'none';
             
             renderPreview();
         }
@@ -585,25 +691,41 @@
             zone.text = document.getElementById('z-text').value;
 
             // Switch d'affichage dynamique
-            document.getElementById('z-url').style.display = zone.type === 'text' ? 'none' : 'block';
-            document.getElementById('z-text').style.display = zone.type === 'text' ? 'block' : 'none';
-            document.querySelector('.text-properties').style.display = zone.type === 'text' ? 'block' : 'none';
-            document.getElementById('z-clock-format').style.display = zone.type === 'clock' ? 'block' : 'none';
+            const isText = zone.type === 'text';
+            const isClock = zone.type === 'clock';
+            const isMedia = ['image', 'video', 'web'].includes(zone.type);
+
+            document.getElementById('z-url').style.display = isMedia ? 'block' : 'none';
+            document.getElementById('z-text').style.display = isText ? 'block' : 'none';
+            document.querySelector('.text-properties').style.display = (isText || isClock) ? 'block' : 'none';
+            document.getElementById('z-clock-group').style.display = isClock ? 'block' : 'none';
+            document.getElementById('z-marquee').parentElement.style.display = isText ? 'flex' : 'none';
+
+            zone.animationIn = document.getElementById('z-anim-in').value;
+            zone.animationInDuration = parseInt(document.getElementById('z-anim-in-dur').value) || 1000;
+            zone.animationOut = document.getElementById('z-anim-out').value;
+            zone.animationOutDuration = parseInt(document.getElementById('z-anim-out-dur').value) || 800;
+            zone.isMarquee = document.getElementById('z-marquee').checked;
 
             // Mettre à jour les propriétés de texte si le type est "text"
             if (zone.type === 'text') {
-                zone.fontFamily = document.getElementById('z-font-family').value;
+                const fontOpt = document.getElementById('z-font-family').selectedOptions[0];
+                zone.fontFamily = fontOpt.value;
+                zone.fontUrl = fontOpt.dataset.url || null;
                 zone.fontSize = parseInt(document.getElementById('z-font-size').value);
                 zone.color = document.getElementById('z-color').value;
                 zone.textAlign = document.getElementById('z-text-align').value;
             } else if (oldType === 'text' && zone.type !== 'clock') { // Nettoyer si on quitte le texte pour autre chose que l'horloge
                 // Si on passe d'un type texte à un autre, nettoyer les propriétés de texte
                 delete zone.fontFamily;
+                delete zone.fontUrl;
                 delete zone.fontSize;
                 delete zone.color;
                 delete zone.textAlign;
             } else if (zone.type === 'clock') {
-                zone.fontFamily = document.getElementById('z-font-family').value;
+                const fontOpt = document.getElementById('z-font-family').selectedOptions[0];
+                zone.fontFamily = fontOpt.value;
+                zone.fontUrl = fontOpt.dataset.url || null;
                 zone.fontSize = parseInt(document.getElementById('z-font-size').value);
                 zone.color = document.getElementById('z-color').value;
                 zone.textAlign = document.getElementById('z-text-align').value;
@@ -711,7 +833,7 @@
 
             const res = await fetch('/api/admin/playlists', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-access-token': token },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ 
                     id: playlistId, // Garde le même ID si on modifie
                     name: name, 
@@ -731,24 +853,34 @@
                 renderTimeline(); // Rafraîchir l'affichage pour s'assurer que tout est à jour
             } else {
                 alert('Erreur lors de l\'enregistrement.');
+                const errorText = await res.text();
+                alert('Erreur lors de l\'enregistrement : ' + errorText);
             }
         }
 
         function formatClock(date, format) {
-            const hours = String(date.getHours()).padStart(2, '0');
+            const h24 = date.getHours();
+            const h12 = h24 % 12 || 12;
+            const hours24 = String(h24).padStart(2, '0');
+            const hours12 = String(h12).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const seconds = String(date.getSeconds()).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
             const month = String(date.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
             const year = date.getFullYear();
+            const yearShort = String(year).slice(-2);
 
             return format
-                .replace(/HH/g, hours)
+                .replace(/HH/g, hours24)
+                .replace(/hh/g, hours12)
                 .replace(/mm/g, minutes)
                 .replace(/ss/g, seconds)
                 .replace(/DD/g, day)
+                .replace(/jj/g, day)
                 .replace(/MM/g, month)
-                .replace(/YYYY/g, year);
+                .replace(/YYYY/g, year)
+                .replace(/aaaa/g, year)
+                .replace(/aa/g, yearShort);
         }
 
         // Gestion des touches Suppr / Backspace pour supprimer zones ou vignettes
