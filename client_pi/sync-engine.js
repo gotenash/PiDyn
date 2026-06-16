@@ -70,11 +70,19 @@ async function getNetworkInfo() {
     }
 
     try {
-        // Récupération SSID et Qualité du signal via les outils wireless
-        const { stdout: ssid } = await execPromise("iwgetid -r || echo ''");
-        const { stdout: quality } = await execPromise("iwconfig 2>&1 | grep 'Link Quality' | head -n 1 | awk '{print $2}' | cut -d'=' -f2 || echo ''");
-        if (ssid.trim()) info.ssid = ssid.trim();
-        if (quality.trim()) info.signal = quality.trim();
+        // Trixie/Bookworm utilisent NetworkManager (nmcli) par défaut
+        const { stdout: nmcliSsid } = await execPromise("nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d: -f2 || echo ''");
+        const { stdout: nmcliSignal } = await execPromise("nmcli -t -f active,signal dev wifi | grep '^yes' | cut -d: -f2 || echo ''");
+
+        let ssid = nmcliSsid.trim();
+        let signal = nmcliSignal.trim() ? nmcliSignal.trim() + "%" : "";
+
+        // Fallback sur les anciens outils (wireless-tools) si nmcli ne renvoie rien
+        if (!ssid) ssid = (await execPromise("iwgetid -r || echo ''")).stdout.trim();
+        if (!signal) signal = (await execPromise("iwconfig 2>&1 | grep 'Link Quality' | head -n 1 | awk '{print $2}' | cut -d'=' -f2 || echo ''")).stdout.trim();
+
+        if (ssid) info.ssid = ssid;
+        if (signal) info.signal = signal;
     } catch (e) { /* Pas de WiFi ou interface wlan0 absente */ }
 
     return info;

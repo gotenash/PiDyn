@@ -8,6 +8,11 @@
 > [!WARNING]
 > This project has just been launched and is currently a **Proof of Concept (POC)**. It is **not** intended for production use at this stage.
 
+### Preview
+<p align="center">
+  <img src="img/admin_panel.png" alt="PiDyn Admin Panel" width="800"/>
+</p>
+
 PiDyn is a comprehensive digital signage solution designed to provide centralized management of content for Raspberry Pi-based display units. It consists of a Node.js server for administration and content delivery, and a client-side application for Raspberry Pi devices that handles display and real-time synchronization.
 
 ## Features
@@ -85,15 +90,6 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
    ```
    The script will update the system, install Node.js, Chromium, X11, copy application files, install Node.js dependencies, and set up systemd services for automatic startup. It will then reboot the system.
 
-### Windows Client Setup
-1.  **Install Node.js:** Install the LTS version on the PC Stick.
-2.  **Configuration:** Create a `.bat` file to launch `sync-engine.js` with the environment variables `PIDYN_SERVER_URL`, `PIDYN_DEVICE_ID`, and `PIDYN_API_KEY`.
-3.  **Kiosk Shortcut:** Create a Chrome shortcut with the flags:
-   ```text
-   --kiosk --autoplay-policy=no-user-gesture-required --user-data-dir="C:\temp\chrome_profile" "file://C:/path/to/player.html"
-   ```
-4.  **Auto-start:** Place the `.bat` and the Chrome shortcut in the `shell:startup` folder.
-
 ## Usage
 1.  **Access Admin Panel:** Open a web browser and navigate to `http://your-server-ip:3000`.
 2.  **Login:** Use the default credentials (e.g., `admin`/`123456`) to log in. **It is highly recommended to change default passwords immediately.**
@@ -114,6 +110,11 @@ This project is licensed under the MIT License.
 
 > [!WARNING]
 > Ce projet vient d'être lancé et est actuellement un **Proof of Concept (POC)**. Il ne doit **pas** être utilisé en production pour le moment.
+
+### Aperçu
+<p align="center">
+  <img src="img/admin_panel.png" alt="Panneau d'administration PiDyn" width="800"/>
+</p>
 
 PiDyn est une solution complète d'affichage dynamique conçue pour offrir une gestion centralisée du contenu pour les unités d'affichage basées sur Raspberry Pi. Il se compose d'un serveur Node.js pour l'administration et la diffusion de contenu, et d'une application côté client pour les appareils Raspberry Pi qui gère l'affichage et la synchronisation en temps réel.
 
@@ -191,15 +192,6 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
    sudo /boot/setup_pi.sh
    ```
    Le script mettra à jour le système, installera Node.js, Chromium, X11, copiera les fichiers de l'application, installera les dépendances Node.js et configurera les services systemd pour un démarrage automatique. Il redémarrera ensuite le système.
-
-### Configuration du Client Windows
-1.  **Installer Node.js :** Installez la version LTS sur le PC Stick.
-2.  **Configuration :** Créez un fichier `.bat` pour lancer `sync-engine.js` avec les variables `PIDYN_SERVER_URL`, `PIDYN_DEVICE_ID`, et `PIDYN_API_KEY`.
-3.  **Raccourci Kiosque :** Créez un raccourci Chrome avec les drapeaux :
-   ```text
-   --kiosk --autoplay-policy=no-user-gesture-required --user-data-dir="C:\temp\chrome_profile" "file://C:/chemin/vers/player.html"
-   ```
-4.  **Démarrage Auto :** Placez le `.bat` et le raccourci Chrome dans le dossier `shell:startup`.
 
 ## Utilisation
 1.  **Accéder au Panneau d'Administration:** Ouvrez un navigateur web et accédez à `http://votre-ip-serveur:3000`.

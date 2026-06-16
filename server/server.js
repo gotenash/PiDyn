@@ -1355,6 +1355,12 @@ io.on('connection', async (socket) => {
         await db('players').where({ id: deviceId }).update({ lastSeen: new Date() });
     }, 30000); // Heartbeat every 30 seconds
 
+    // Relayer la capture d'écran reçue du client vers l'interface Admin
+    socket.on('screenshot-taken', (data) => {
+        console.log(`✅ Capture d'écran reçue de ${data.deviceId} et relayée aux admins`);
+        io.emit('screenshot-taken', data);
+    });
+
     // Gérer les mises à jour de statut de téléchargement
     socket.on('player-status-update', (status) => {
         db('players').where({ id: deviceId }).update({ downloadStatus: JSON.stringify(status) })
