@@ -1,92 +1,379 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Éditeur de Diaporama</title>
+    <title>Éditeur de Diaporama - PiDyn Pro</title>
     <style>
-        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; }
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; position: relative; }
         header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
         
         .main-container { display: flex; flex: 1; overflow: hidden; }
         
         /* Zone de Prévisualisation */
-        .preview-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #34495e; padding: 20px; }
+        .preview-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #34495e; padding: 20px; user-select: none; }
+        
+        /* CORRECTION STABILISATION : Plus de min-width/height arbitraires qui cassent le ratio 1920x1080 */
         .screen-mockup { 
-            background: black; position: relative; 
-            box-shadow: 0 0 20px rgba(0,0,0,0.5); overflow: hidden;
-            transition: all 0.3s ease;
+            background: #000000; position: relative; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.8); overflow: hidden;
+            transition: transform 0.2s ease;
             cursor: crosshair;
+            display: block !important;
         }
         .screen-mockup.grid-active {
             background-image: 
                 linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px);
-            background-size: 2% 2%; /* Correspond à GRID_SIZE */
+            background-size: 2% 2%; 
         }
-        .screen-mockup .bg-layer { position: absolute; top:0; left:0; width:100%; height:100%; object-fit: cover; z-index: 1; }
+        .screen-mockup .bg-layer { position: absolute; top:0; left:0; width:100%; height:100%; object-fit: cover; z-index: 1; pointer-events: none; }
         
         .zone { 
             position: absolute; border: 1px dashed rgba(255,255,255,0.5); 
             background: rgba(52, 152, 219, 0.2); z-index: 5;
             display: flex; align-items: center; justify-content: center;
             cursor: move;
+            box-sizing: border-box;
         }
         .resizer {
             width: 10px; height: 10px; background: #3498db;
             position: absolute; right: -5px; bottom: -5px;
             cursor: nwse-resize; z-index: 10;
         }
+        .rotator-handle {
+            width: 10px; height: 10px; background: #27ae60;
+            border: 2px solid white;
+            border-radius: 50%;
+            position: absolute; top: -25px; left: 50%;
+            transform: translateX(-50%);
+            cursor: grab; z-index: 15;
+        }
+        .rotator-handle::after {
+            content: '';
+            position: absolute;
+            top: 8px;
+            left: 4px;
+            width: 2px;
+            height: 15px;
+            background: white;
+            z-index: -1;
+        }
         .zone.selected { border: 2px solid #3498db; background: rgba(52, 152, 219, 0.4); }
         .zone img, .zone video { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
         .zone-label { 
             position: absolute; top: -20px; left: 0; background: #3498db; 
-            color: white; font-size: 10px; padding: 2px 5px;
+            color: white; font-size: 10px; padding: 2px 5px; white-space: nowrap;
         }
 
         /* Sidebar Propriétés */
-        .sidebar { width: 300px; background: #1a252f; padding: 20px; border-left: 1px solid #34495e; overflow-y: auto; }
+        .sidebar { width: 300px; background: #1a252f; padding: 20px; border-left: 1px solid #34495e; overflow-y: auto; box-sizing: border-box; }
         .sidebar input, .sidebar select { width: 100%; padding: 8px; margin: 10px 0; box-sizing: border-box; }
 
-        /* Frise Chronologique */
-        .timeline-area { height: 150px; background: #1a252f; border-top: 2px solid #3498db; display: flex; align-items: center; padding: 0 20px; overflow-x: auto; gap: 10px; }
-        .timeline-item { 
-            min-width: 120px; height: 80px; background: #34495e; border: 2px solid transparent;
-            border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center;
-            font-size: 12px; position: relative;
+        /* Structure de la timeline multipiste */
+        .timeline-area { 
+            height: 220px; 
+            background: #1a252f; 
+            border-top: 2px solid #3498db; 
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
-        .timeline-item .delete-btn {
-            position: absolute; top: 2px; right: 2px; background: #e74c3c;
-            color: white; border: none; border-radius: 50%; width: 18px; height: 18px;
-            font-size: 12px; cursor: pointer; display: none; align-items: center; justify-content: center; z-index: 10;
-            line-height: 1;
+
+        .timeline-global-actions {
+            display: flex;
+            gap: 15px;
+            padding: 10px 20px;
+            background: #111a24;
+            border-bottom: 1px solid #34495e;
+            align-items: center;
         }
-        .timeline-item:hover .delete-btn { display: flex; }
-        .timeline-item .duplicate-btn {
-            position: absolute; top: 2px; left: 2px; background: #27ae60;
-            color: white; border: none; border-radius: 50%; width: 18px; height: 18px;
-            font-size: 12px; cursor: pointer; display: none; align-items: center; justify-content: center; z-index: 10;
-            line-height: 1;
+
+        .timeline-tracks-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: auto;
         }
-        .timeline-item:hover .duplicate-btn { display: flex; }
-        .timeline-item.active { border-color: #3498db; background: #2980b9; }
-        .timeline-item img { height: 40px; margin-bottom: 5px; }
+
+        .timeline-track {
+            display: flex;
+            border-bottom: 1px solid #2c3e50;
+            height: 45px;
+            align-items: center;
+            min-height: 45px;
+        }
+
+        .track-header {
+            width: 200px;
+            min-width: 200px;
+            background: #16202c;
+            padding: 0 10px;
+            font-size: 12px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-right: 2px solid #3498db;
+            box-sizing: border-box;
+            cursor: pointer;
+            position: sticky;
+            left: 0;
+            z-index: 10;
+        }
+
+        .track-timeline {
+            flex: 1;
+            position: relative;
+            background: #233344;
+            height: 100%;
+        }
+
+        .timeline-block {
+            position: absolute;
+            height: 80%;
+            top: 10%;
+            background: #3498db;
+            border-radius: 4px;
+            color: white;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            cursor: move;
+            box-sizing: border-box;
+            user-select: none;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .timeline-block.page-block {
+            background: #27ae60;
+        }
+
+        .timeline-block .resizer-h {
+            position: absolute;
+            right: 0; top: 0; bottom: 0;
+            width: 8px;
+            background: rgba(255,255,255,0.3);
+            cursor: ew-resize;
+        }
+
+        /* Dropdown pour l'ajout de diapositive */
+        .timeline-dropdown-content {
+            display: none;
+            position: absolute;
+            background: #1a252f;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5);
+            z-index: 1000;
+            border: 1px solid #34495e;
+            border-radius: 4px;
+            top: 100%;
+            margin-top: 5px;
+            left: 0;
+        }
+        .dropdown-icon-btn {
+            background: #2c3e50;
+            border: 1px solid #34495e;
+            color: white;
+            padding: 8px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, transform 0.1s;
+            margin: 0;
+            width: 34px;
+            height: 34px;
+            box-sizing: border-box;
+        }
+        .dropdown-icon-btn:hover {
+            background: #3498db;
+        }
+        .dropdown-icon-btn:active {
+            transform: scale(0.95);
+        }
         
-        /* Indicateur visuel pour le drag & drop */
-        .timeline-item.drag-over {
+        /* Effet de survol drag & drop sur la frise */
+        .timeline-block.page-block.drag-over {
             border-left: 6px solid #2ecc71 !important;
-            transition: border-left 0.1s;
+            box-shadow: 0 0 10px rgba(46, 204, 113, 0.5);
         }
-        /* Désactiver les événements sur les enfants pendant le drag pour éviter les clignotements */
-        .timeline-area.dragging .timeline-item * {
-            pointer-events: none;
+
+        /* Notifications toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #2ebd7a;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            transform: translateY(20px);
+            display: none;
+            align-items: center;
+            gap: 8px;
+            font-family: sans-serif;
+            font-size: 13px;
+        }
+        .toast.show {
+            display: flex;
+            opacity: 1;
+            transform: translateY(0);
         }
 
         button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; background: #3498db; color: white; }
+        button.secondary { background: #7f8c8d; }
         button.danger { background: #e74c3c; }
+
+        /* Onglets de pliage interactifs */
+        .sidebar-toggle-tab {
+            position: absolute;
+            right: 300px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 60px;
+            background: #1a252f;
+            border: 1px solid #34495e;
+            border-right: none;
+            color: #bdc3c7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 8px 0 0 8px;
+            font-size: 11px;
+            z-index: 999;
+            transition: right 0.2s, background 0.2s;
+            user-select: none;
+        }
+        .sidebar-toggle-tab:hover {
+            background: #34495e;
+            color: white;
+        }
+        
+        .timeline-toggle-tab {
+            position: absolute;
+            bottom: 220px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 16px;
+            background: #1a252f;
+            border: 1px solid #34495e;
+            border-bottom: none;
+            color: #bdc3c7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            font-size: 10px;
+            z-index: 999;
+            transition: bottom 0.2s, background 0.2s;
+            user-select: none;
+        }
+        .timeline-toggle-tab:hover {
+            background: #34495e;
+            color: white;
+        }
+
+        /* Pliage par classes */
+        body.sidebar-collapsed .sidebar {
+            display: none !important;
+        }
+        body.sidebar-collapsed .sidebar-toggle-tab {
+            right: 0 !important;
+        }
+        
+        body.timeline-collapsed .timeline-area {
+            height: 45px !important;
+        }
+        body.timeline-collapsed .timeline-tracks-container {
+            display: none !important;
+        }
+        body.timeline-collapsed .timeline-toggle-tab {
+            bottom: 45px !important;
+        }
+
+        /* Boutons extensibles au survol */
+        .hover-expand-btn {
+            display: flex !important;
+            align-items: center;
+            gap: 0;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            white-space: nowrap;
+            overflow: hidden;
+            max-width: 34px;
+            padding: 6px 10px !important;
+            justify-content: flex-start;
+            font-size: 12px;
+            box-sizing: border-box;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+        }
+        .hover-expand-btn .btn-text {
+            max-width: 0;
+            opacity: 0;
+            display: inline-block;
+            transition: max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, margin-left 0.25s;
+            overflow: hidden;
+            margin-left: 0;
+        }
+        .hover-expand-btn:hover {
+            max-width: 130px;
+            gap: 5px;
+            padding: 6px 12px !important;
+        }
+        .hover-expand-btn:hover .btn-text {
+            max-width: 90px;
+            opacity: 1;
+            margin-left: 4px;
+        }
+        /* Overlay de chargement pour import PPTX */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-family: sans-serif;
+        }
+        .loading-spinner {
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #9b59b6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
     <header>
-        <a href="/" style="color: #bdc3c7; text-decoration: none;">&larr; Retour</a>
+        <a href="/diaporamas" class="hover-expand-btn secondary" title="Retour aux diaporamas">&larr;<span class="btn-text">Retour</span></a>
+        <label style="font-size: 12px; color: #bdc3c7; margin-left: 10px; white-space: nowrap;">Nom du diaporama :</label>
         <input type="text" id="pl-name" placeholder="Nom du diaporama" style="padding: 5px; border-radius: 4px; border: none; width: 250px;">
         <div style="display:flex; align-items:center; gap:10px;">
             <label style="font-size:12px">Résolution :</label>
@@ -95,253 +382,516 @@
                 <option value="9/16">Portrait (9:16)</option>
                 <option value="4/3">Classique (4:3)</option>
             </select>
-            <label style="font-size:12px">Fond :</label>
-            <select id="global-bg" onchange="updateGlobalBg()" style="padding:4px;"></select>
-            <label style="font-size:12px">Couleur :</label>
-            <input type="color" id="global-bg-color" oninput="updateGlobalBgColor()" style="padding:0; height:22px; width:40px; border:none; vertical-align: middle; cursor:pointer;">
         </div>
         <label style="font-size:12px; display: flex; align-items: center; gap: 5px; cursor: pointer;">
             <input type="checkbox" id="grid-toggle" checked onchange="toggleGrid()" style="width: auto; margin: 0;">
             Aimantation
         </label>
-        <button class="secondary" onclick="previewPlaylist()">Aperçu</button>
-        <button onclick="savePlaylist()">Enregistrer</button>
+        <div style="display: flex; gap: 5px; align-items: center; border-left: 1px solid #34495e; padding-left: 10px; margin-left: 5px;">
+            <button type="button" id="btn-toggle-sidebar" onclick="toggleSidebar()" title="Afficher/Masquer le panneau des propriétés" class="hover-expand-btn" style="background: #3498db;">📐<span class="btn-text">Propriétés</span></button>
+            <button type="button" id="btn-toggle-timeline" onclick="toggleTimeline()" title="Afficher/Masquer la frise chronologique" class="hover-expand-btn" style="background: #3498db;">🎞️<span class="btn-text">Frise</span></button>
+        </div>
+        <button type="button" class="hover-expand-btn secondary" onclick="previewPlaylist()" title="Aperçu du diaporama">👁️<span class="btn-text">Aperçu</span></button>
+        <button type="button" class="hover-expand-btn" onclick="savePlaylist()" title="Enregistrer le diaporama" style="background: #27ae60;">💾<span class="btn-text">Enregistrer</span></button>
+        <button type="button" id="btn-submit-playlist" class="hover-expand-btn" onclick="submitCurrentPlaylist()" title="Soumettre pour validation" style="background: #e67e22; display: none;">📨<span class="btn-text">Soumettre</span></button>
+        <button type="button" id="btn-approve-playlist" class="hover-expand-btn" onclick="approveCurrentPlaylist()" title="Valider ce diaporama" style="background: #2ecc71; display: none;">✅<span class="btn-text">Valider</span></button>
+        <button type="button" id="btn-publish-playlist" class="hover-expand-btn" onclick="openPublishModal()" title="Diffuser sur les écrans" style="background: #9b59b6; display: none;">📢<span class="btn-text">Publier</span></button>
     </header>
 
     <div class="main-container">
         <div class="preview-area" id="drop-zone">
-            <div class="screen-mockup" id="preview-screen" 
-                 onmousedown="handleMouseDown(event)">
-                <!-- Rendu dynamique ici -->
+            <div class="screen-mockup" id="preview-screen" onmousedown="handleMouseDown(event)">
                 <div id="template-preview-layer" style="position:absolute; inset:0; z-index:4; display:none; pointer-events:none; background:rgba(0,0,0,0.8); flex-direction:column; justify-content:center; align-items:center; padding:20px; text-align:center;"></div>
             </div>
             <p id="item-info" style="margin-top: 10px; color: #bdc3c7;">Dessinez un cadre sur l'écran pour ajouter une zone</p>
         </div>
 
-        <div class="sidebar">
-            <div id="page-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
-                <h3>Propriétés de la page</h3>
-                <label>Durée de la page (ms)</label>
-                <input type="number" id="page-duration" oninput="updatePageDuration()">
+        <div class="sidebar" style="display: flex; flex-direction: column; padding: 0;">
+            <!-- Onglets Page / Calque -->
+            <div class="sidebar-tabs" style="display: flex; border-bottom: 1px solid #34495e; background: #111a24; min-height: 40px;">
+                <div class="sidebar-tab active" id="tab-page" onclick="switchSidebarTab('page')" style="flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #3498db; border-bottom: 2px solid #3498db; font-size: 13px; user-select: none;">Page</div>
+                <div class="sidebar-tab" id="tab-zone" onclick="switchSidebarTab('zone')" style="flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #bdc3c7; border-bottom: 2px solid transparent; font-size: 13px; user-select: none;">Calque</div>
+            </div>
+
+            <!-- Contenu de l'onglet Page -->
+            <div id="sidebar-page-content" style="flex: 1; overflow-y: auto; padding: 20px;">
+                <div id="page-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0;">Propriétés de la page</h3>
+                    <label>Durée de la page (ms)</label>
+                    <input type="number" id="page-duration" oninput="updatePageDuration()">
+                    
+                    <label>Image de fond de page</label>
+                    <select id="page-bg-url" onchange="updatePageBgUrl()"></select>
+
+                    <label>Couleur de fond de page</label>
+                    <input type="color" id="page-bg-color" oninput="updatePageBgColor()">
+
+                    <button class="danger" onclick="deleteCurrentItem()" style="width: 100%; margin-top: 10px;">Supprimer la page</button>
+                </div>
+
+                <div id="template-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0;">Contenu du Modèle</h3>
+                    <div id="template-fields"></div>
+                </div>
+
+                <div id="no-page-message" style="display: block; text-align: center; color: #bdc3c7; padding: 20px 0; font-size: 12px;">
+                    Sélectionnez une diapositive pour afficher et modifier ses propriétés.
+                </div>
+            </div>
+
+            <!-- Contenu de l'onglet Calque -->
+            <div id="sidebar-zone-content" style="flex: 1; overflow-y: auto; padding: 20px; display: none;">
+                <div id="no-zone-message" style="display: block; text-align: center; color: #bdc3c7; padding: 20px 0; font-size: 12px;">
+                    Veuillez sélectionner ou créer un calque pour modifier ses propriétés.
+                </div>
                 
-                <label>Couleur de fond de page</label>
-                <input type="color" id="page-bg-color" oninput="updatePageBgColor()">
-
-                <button class="danger" onclick="deleteCurrentItem()" style="width: 100%; margin-top: 10px;">Supprimer la page</button>
-            </div>
-
-            <div id="template-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
-                <h3>Contenu du Modèle</h3>
-                <div id="template-fields"></div>
-            </div>
-
-            <h3>Propriétés de la zone</h3>
-            <div id="zone-editor" style="display: none;">
-                <label>Type de contenu</label>
-                <select id="z-type" onchange="updateZone()">
-                    <option value="image">Image</option>
-                    <option value="video">Vidéo</option>
-                    <option value="web">Web / Sozi (HTML)</option>
-                    <option value="clock">Horloge</option>
-                    <option value="text">Texte</option>
-                </select>
-
-                <label>Média / Texte</label>
-                <div id="z-content-container">
-                    <select id="z-url" onchange="updateZone()"></select>
-                    <input type="text" id="z-text" oninput="updateZone()" style="display:none;" placeholder="Votre texte ici...">
-                </div>
-
-                <div class="text-properties" style="display: none;">
-                    <label>Police</label>
-                    <select id="z-font-family" onchange="updateZone()">
-                        <option value="Arial, sans-serif">Arial</option>
-                        <option value="Verdana, sans-serif">Verdana</option>
-                        <option value="Helvetica, sans-serif">Helvetica</option>
-                        <option value="Georgia, serif">Georgia</option>
-                        <option value="Times New Roman, serif">Times New Roman</option>
-                        <option value="Courier New, monospace">Courier New</option>
-                        <option value="Impact, sans-serif">Impact</option>
-                        <option value="sans-serif">Par défaut (sans-serif)</option>
-                        <option value="serif">Par défaut (serif)</option>
-                        <option value="monospace">Par défaut (monospace)</option>
+                <div id="zone-editor" style="display: none;">
+                    <h3 style="margin-top: 0;">Propriétés du calque</h3>
+                    <label>Type de contenu</label>
+                    <select id="z-type" onchange="updateZone()">
+                        <option value="image">Image</option>
+                        <option value="video">Vidéo</option>
+                        <option value="web">Web / Sozi (HTML)</option>
+                        <option value="clock">Horloge</option>
+                        <option value="text">Texte</option>
+                        <option value="qrcode">Code QR</option>
                     </select>
 
-                    <label>Taille de police (px)</label>
-                    <input type="number" id="z-font-size" oninput="updateZone()" value="24">
+                    <label id="z-content-label">Média / Texte</label>
+                    <div id="z-content-container">
+                        <select id="z-url" onchange="updateZone()"></select>
+                        <input type="text" id="z-web-url" oninput="updateZone()" style="display:none;" placeholder="Adresse web (https://...) ou chemin local">
+                        <input type="text" id="z-text" oninput="updateZone()" style="display:none;" placeholder="Votre texte ici...">
+                    </div>
 
-                    <label>Couleur du texte</label>
-                    <input type="color" id="z-color" oninput="updateZone()" value="#ffffff">
+                    <!-- Propriétés spécifiques aux zones Web / Iframe -->
+                    <div id="web-properties" style="display: none; border-top: 1px dashed #34495e; padding-top: 10px; margin-top: 10px;">
+                        <h4 style="margin: 0 0 10px 0; color: #3498db; font-size: 13px;">Ajustements d'affichage Web</h4>
+                        <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                            <div style="flex: 1;">
+                                <label style="font-size: 11px; margin-bottom: 2px;">Zoom (%)</label>
+                                <input type="number" id="z-web-zoom" oninput="updateZone()" value="100" min="10" max="1000" step="5" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                            </div>
+                            <div style="flex: 1;">
+                                <label style="font-size: 11px; margin-bottom: 2px;">Décalage X (%)</label>
+                                <input type="number" id="z-web-panx" oninput="updateZone()" value="0" step="1" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                            </div>
+                            <div style="flex: 1;">
+                                <label style="font-size: 11px; margin-bottom: 2px;">Décalage Y (%)</label>
+                                <input type="number" id="z-web-pany" oninput="updateZone()" value="0" step="1" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                            </div>
+                        </div>
+                        <button type="button" onclick="resetWebDisplay()" style="padding: 5px 10px; font-size: 11px; width: 100%; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px;">Centrer et réinitialiser l'affichage</button>
+                        <div style="font-size: 11px; color: #bdc3c7; margin-top: 5px; line-height: 1.4; background: rgba(52, 152, 219, 0.15); border-left: 3px solid #3498db; padding: 6px 10px; border-radius: 3px;">
+                            💡 <b>Raccourcis souris :</b> Survolez le calque Web sélectionné dans l'aperçu et utilisez la <b>molette</b> pour zoomer. Maintenez la touche <b>MAJ</b> enfoncée et glissez la souris pour décaler le contenu.
+                        </div>
+                    </div>
 
-                    <label>Alignement du texte</label>
-                    <select id="z-text-align" onchange="updateZone()">
-                        <option value="left">Gauche</option>
-                        <option value="center">Centre</option>
-                        <option value="right">Droite</option>
-                        <option value="justify">Justifié</option>
-                    </select>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="font-weight: bold; margin-bottom: 4px; display: block; font-size:11px;">Début (ms)</label>
+                            <input type="number" id="z-start" oninput="updateZone()" placeholder="0" min="0" step="250" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-weight: bold; margin-bottom: 4px; display: block; font-size:11px;">Durée (ms)</label>
+                            <input type="number" id="z-duration" oninput="updateZone()" placeholder="5000" min="500" step="250" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                        </div>
+                    </div>
 
-                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; margin-top:10px;">
-                        <input type="checkbox" id="z-marquee" onchange="updateZone()" style="width:auto; margin:0;">
-                        Texte défilant (Marquee)
-                    </label>
-                </div>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="font-weight: bold; margin-bottom: 4px; display: block; font-size:11px;">Rotation (degrés)</label>
+                            <input type="number" id="z-rotate" oninput="updateZone()" placeholder="0" min="-360" max="360" step="5" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-weight: bold; margin-bottom: 4px; display: block; font-size:11px;">Inclinaison (X deg)</label>
+                            <input type="number" id="z-skewx" oninput="updateZone()" placeholder="0" min="-90" max="90" step="5" style="width: 100%; box-sizing: border-box; background: #2c3e50; color: white; border: 1px solid #34495e; padding: 5px; border-radius: 4px;">
+                        </div>
+                    </div>
 
-                <label>Animation d'entrée</label>
-                <div style="display: flex; gap: 5px;">
-                    <select id="z-anim-in" onchange="updateZone()" style="flex: 2;">
-                        <option value="none">Aucune</option>
-                        <option value="fade-in">Fondu</option>
-                        <option value="slide-top">Haut</option>
-                        <option value="slide-bottom">Bas</option>
-                        <option value="slide-left">Gauche</option>
-                        <option value="slide-right">Droite</option>
-                        <option value="zoom-in">Zoom</option>
-                    </select>
-                    <input type="number" id="z-anim-in-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0;" title="Durée (ms)">
-                </div>
+                    <div class="text-properties" style="display: none;">
+                        <label>Police</label>
+                        <select id="z-font-family" onchange="updateZone()">
+                            <option value="Arial, sans-serif">Arial</option>
+                            <option value="Verdana, sans-serif">Verdana</option>
+                            <option value="Helvetica, sans-serif">Helvetica</option>
+                            <option value="Georgia, serif">Georgia</option>
+                            <option value="Times New Roman, serif">Times New Roman</option>
+                            <option value="Courier New, monospace">Courier New</option>
+                            <option value="Impact, sans-serif">Impact</option>
+                            <option value="sans-serif">Par défaut (sans-serif)</option>
+                            <option value="serif">Par défaut (serif)</option>
+                            <option value="monospace">Par défaut (monospace)</option>
+                        </select>
 
-                <label>Animation de sortie</label>
-                <div style="display: flex; gap: 5px;">
-                    <select id="z-anim-out" onchange="updateZone()" style="flex: 2;">
-                        <option value="none">Aucune</option>
-                        <option value="fade-out">Fondu</option>
-                        <option value="zoom-out">Zoom Arrière</option>
-                    </select>
-                    <input type="number" id="z-anim-out-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0;" title="Durée (ms)">
-                </div>
+                        <label>Taille de police (px)</label>
+                        <input type="number" id="z-font-size" oninput="updateZone()" value="24">
 
-                    <div id="z-clock-group" style="display: none;">
-                        <label>Format de l'horloge (ex: HH:mm:ss, jj/MM/aaaa)</label>
+                        <label>Couleur du texte</label>
+                        <input type="color" id="z-color" oninput="updateZone()" value="#ffffff">
+
+                        <label>Alignement du texte</label>
+                        <select id="z-text-align" onchange="updateZone()">
+                            <option value="left">Gauche</option>
+                            <option value="center">Centre</option>
+                            <option value="right">Droite</option>
+                            <option value="justify">Justifié</option>
+                        </select>
+
+                        <label>Format de l'horloge (ex: HH:mm:ss, DD/MM/YYYY)</label>
                         <input type="text" id="z-clock-format" oninput="updateZone()" value="HH:mm:ss">
                     </div>
+
+                    <div style="border-top: 1px dashed #34495e; margin-top: 15px; padding-top: 10px;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Animations (Entrée / Sortie)</label>
+                        
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <select id="z-anim-in" onchange="updateZone()" style="flex: 2; margin: 0; padding: 6px;">
+                                <option value="none">Pas d'animation d'entrée</option>
+                                <option value="fade-in">Apparition en fondu</option>
+                                <option value="slide-top">Glissement depuis le haut</option>
+                                <option value="slide-bottom">Glissement depuis le bas</option>
+                                <option value="slide-left">Glissement depuis la gauche</option>
+                                <option value="slide-right">Glissement depuis la droite</option>
+                                <option value="zoom-in">Zoom avant</option>
+                            </select>
+                            <input type="number" id="z-anim-in-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0; padding: 6px;" title="Durée (ms)" min="100" step="100" value="1000">
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                            <select id="z-anim-out" onchange="updateZone()" style="flex: 2; margin: 0; padding: 6px;">
+                                <option value="none">Pas d'animation de sortie</option>
+                                <option value="fade-out">Disparition en fondu</option>
+                                <option value="zoom-out">Zoom arrière</option>
+                            </select>
+                            <input type="number" id="z-anim-out-dur" oninput="updateZone()" placeholder="ms" style="flex: 1; margin: 0; padding: 6px;" title="Durée (ms)" min="100" step="100" value="800">
+                        </div>
+                    </div>
+
+                    <label>Ordre des couches</label>
+                    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                        <button onclick="moveZoneBackward()" style="flex: 1; background: #6c757d;" title="Reculer d'un plan">Reculer</button>
+                        <button onclick="moveZoneForward()" style="flex: 1; background: #6c757d;" title="Avancer d'un plan">Avancer</button>
+                    </div>
+
+                    <button onclick="updateZone()" style="width: 100%; margin-top: 10px; background: #28a745; font-weight: bold;">Appliquer les modifications</button>
+
+                    <button class="danger" onclick="deleteZone()" style="width: 100%; margin-top: 20px;">Supprimer la zone</button>
                 </div>
-
-                <label>Ordre des couches</label>
-                <div style="display: flex; gap: 5px; margin-bottom: 10px;">
-                    <button onclick="moveZoneBackward()" style="flex: 1; background: #6c757d;" title="Reculer d'un plan">Reculer</button>
-                    <button onclick="moveZoneForward()" style="flex: 1; background: #6c757d;" title="Avancer d'un plan">Avancer</button>
-                </div>
-
-                <button onclick="updateZone()" style="width: 100%; margin-top: 10px; background: #28a745; font-weight: bold;">Appliquer les modifications</button>
-
-                <button class="danger" onclick="deleteZone()" style="width: 100%; margin-top: 20px;">Supprimer la zone</button>
             </div>
         </div>
     </div>
 
-    <div class="timeline-area">
-        <div id="timeline-controls" style="display: flex; flex-direction: column; gap: 5px; padding-right: 20px; border-right: 1px solid #34495e;">
-            <button onclick="addNewItem()" style="min-width: 100px; background: #27ae60;">+ Page Vide</button>
-            <button onclick="addTemplate('canteen')" style="min-width: 100px; background: #f39c12; font-size: 11px;">+ Modèle Cantine</button>
-            <button onclick="addTemplate('meeting')" style="min-width: 100px; background: #9b59b6; font-size: 11px;">+ Modèle Réunion</button>
+    <!-- Collapse arrow buttons -->
+    <div class="sidebar-toggle-tab" onclick="toggleSidebar()" id="sidebar-toggle-arrow" title="Afficher/Masquer les propriétés">▶</div>
+    <div class="timeline-toggle-tab" onclick="toggleTimeline()" id="timeline-toggle-arrow" title="Afficher/Masquer la frise">▼</div>
+
+    <div class="timeline-area" id="timeline">
+        <div class="timeline-global-actions">
+            <div style="position: relative; display: inline-block;">
+                <button onclick="toggleSlideTypeMenu(event)" style="padding: 6px 15px; background: #27ae60; font-weight: bold;">+ Ajouter Diapo</button>
+                <div id="slide-type-dropdown" class="timeline-dropdown-content" style="display: none; padding: 6px; flex-direction: column; gap: 6px; min-width: 250px;">
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button type="button" onclick="addSlideWithType('empty')" class="dropdown-icon-btn" title="Page Vide (Zones libres)" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">📄</button>
+                        <button type="button" onclick="addSlideWithType('video_fullscreen')" class="dropdown-icon-btn" title="Vidéo Plein Écran" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">🎥</button>
+                        <button type="button" onclick="addSlideWithType('canteen')" class="dropdown-icon-btn" title="Modèle Cantine" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">🍴</button>
+                        <button type="button" onclick="addSlideWithType('meeting')" class="dropdown-icon-btn" title="Modèle Salle Réunion" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">👥</button>
+                        <button type="button" onclick="addSlideWithType('weather')" class="dropdown-icon-btn" title="Modèle Météo" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">☀️</button>
+                        <div style="width: 1px; height: 24px; background: #34495e; margin: 0 2px;"></div>
+                        <button type="button" onclick="triggerPptxImport()" class="dropdown-icon-btn" title="Importer un PPTX local" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">📥</button>
+                        <button type="button" onclick="openPptxSelectModal()" class="dropdown-icon-btn" title="Importer un PPTX existant de la médiathèque" onmouseover="setDropdownHelpText(this.title)" onmouseout="clearDropdownHelpText()">📁</button>
+                    </div>
+                    <div id="dropdown-help-text" style="font-size: 11px; color: #bdc3c7; text-align: center; height: 14px; line-height: 14px; font-weight: normal; margin-top: 2px;">
+                        Survolez une icône...
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label style="font-size: 12px; color: #bdc3c7;">Page active : </label>
+                <select id="page-selector" onchange="selectItem(parseInt(this.value))" style="width: auto; padding: 5px; margin: 0; background: #2c3e50; color: white; border: 1px solid #34495e; border-radius:4px;">
+                    <option value="-1">-- Aucune page --</option>
+                </select>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; margin-left: auto;">
+                <label style="font-size: 12px; color: #bdc3c7;">Zoom : </label>
+                <button onclick="zoomOut()" style="padding: 4px 10px; font-size: 12px; background: #34495e;">➖</button>
+                <span id="zoom-level" style="font-size: 12px; min-width: 35px; text-align: center; font-weight: bold; color: white;">100%</span>
+                <button onclick="zoomIn()" style="padding: 4px 10px; font-size: 12px; background: #34495e;">➕</button>
+            </div>
         </div>
-        <div id="timeline-list" style="display: flex; align-items: center; gap: 10px; flex: 1; overflow-x: auto; padding-left: 10px;"></div>
-        <!-- Items de la frise -->
+        <div class="timeline-tracks-container" id="tracks-container">
+            </div>
     </div>
 
     <script>
         const token = localStorage.getItem('pidyn_token');
         if (!token) window.location.href = '/';
         
-        const PREVIEW_AUTH = '?apiKey=ma_cle_secrete_123';
+        const PREVIEW_AUTH = '?token=' + token;
 
         const urlParams = new URLSearchParams(window.location.search);
         let playlistId = urlParams.get('id');
         
         let playlistData = { name: '', backgroundUrl: '', backgroundColor: '#000000', resolution: '16/9', items: [] };
         let selectedIndex = -1;
-        let selectedZoneIndex = -1; // Index de la zone dans la page
+        let selectedZoneIndex = -1; 
         let availableMedia = [];
         
-        // Variables pour les interactions
-        let mode = 'none'; // 'drawing', 'moving', 'resizing'
+        let mode = 'none'; 
         let useGrid = true;
-        const GRID_SIZE = 2; // Taille de la grille en %
+        const GRID_SIZE = 2; 
 
+        let startX, startY; 
+        let initialX, initialY, initialW, initialH; 
+        let currentDrawingZone = null;
+        let rotationCenter = null;
+
+        let timelineMode = 'none'; 
+        let activeSlideIdx = -1;
+        let activeZoneIdx = -1;
+        let timelineStartX = 0;
+        let initialBlockStart = 0;
+        let initialBlockDuration = 0;
+
+        let timelineZoom = 1.0;
+        let weatherCache = {};
         let undoStack = [];
         let redoStack = [];
-        const MAX_UNDO_STATES = 20; // Limite l'historique à 20 états
+        const MAX_UNDO_STATES = 20;
 
-        let startX, startY, offsetX, offsetY; // Position de la souris au clic (%)
-        let initialX, initialY, initialW, initialH; // Géométrie initiale de la zone (%)
-        let currentDrawingZone = null;
+        function getWeatherIcon(code) {
+            if (code === 0) return '☀️';
+            if (code <= 3) return '⛅';
+            if (code <= 48) return '🌫️';
+            if (code <= 55) return '🌦️';
+            if (code <= 65) return '🌧️';
+            if (code <= 77) return '❄️';
+            if (code <= 82) return '🌦️';
+            if (code <= 99) return '⛈️';
+            return '☁️';
+        }
+
+        function getSlideThumbnail(item) {
+            let style = `width: 24px; height: 16px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; overflow: hidden;`;
+            
+            if (item.template) {
+                let icon = '📄';
+                let bg = '#34495e';
+                if (item.template === 'video_fullscreen') { icon = '🎥'; bg = '#e74c3c'; }
+                else if (item.template === 'canteen') { icon = '🍴'; bg = '#2980b9'; }
+                else if (item.template === 'meeting') { icon = '📅'; bg = '#8e44ad'; }
+                else if (item.template === 'weather') { icon = '🌤️'; bg = '#f39c12'; }
+                return `<div style="${style} background: ${bg};">${icon}</div>`;
+            }
+            
+            const bgCol = item.backgroundColor || '#000000';
+            if (playlistData.backgroundUrl) {
+                return `<div style="${style} background-image: url('${playlistData.backgroundUrl}${PREVIEW_AUTH}'); background-size: cover; background-position: center;"></div>`;
+            }
+            return `<div style="${style} background-color: ${bgCol};"></div>`;
+        }
+
+        function getZoneThumbnail(zone) {
+            let style = `width: 20px; height: 20px; border-radius: 2px; border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; overflow: hidden; background: rgba(0,0,0,0.3);`;
+            
+            if (zone.type === 'image' && zone.url) {
+                return `<div style="${style} background-image: url('${zone.url}${PREVIEW_AUTH}'); background-size: cover; background-position: center;"></div>`;
+            }
+            
+            let icon = '🔳';
+            if (zone.type === 'image') icon = '🖼️';
+            else if (zone.type === 'video') icon = '🎥';
+            else if (zone.type === 'clock') icon = '🕒';
+            else if (zone.type === 'text') icon = '🔤';
+            else if (zone.type === 'web') icon = '🌐';
+            
+            return `<div style="${style}">${icon}</div>`;
+        }
+
+        function zoomIn() {
+            if (timelineZoom < 8.0) {
+                timelineZoom = Math.min(8.0, timelineZoom + 0.5);
+                updateZoomUI();
+            }
+        }
+
+        function zoomOut() {
+            if (timelineZoom > 1.0) {
+                timelineZoom = Math.max(1.0, timelineZoom - 0.5);
+                updateZoomUI();
+            }
+        }
+
+        function updateZoomUI() {
+            document.getElementById('zoom-level').textContent = Math.round(timelineZoom * 100) + '%';
+            renderTimeline();
+        }
 
         async function init() {
-            const headers = { 'x-access-token': token };
+            const headers = { 'Authorization': `Bearer ${token}` };
             
-            // Charger la médiathèque
-            const mediaRes = await fetch('/api/admin/media', { headers: { 'Authorization': `Bearer ${token}` } });
+            const mediaRes = await fetch('/api/admin/media', { headers });
             availableMedia = await mediaRes.json();
             populateMediaSelects();
 
             if (playlistId) {
-                const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+                const res = await fetch('/api/admin/data', { headers });
                 const data = await res.json();
-                if (data.playlists[playlistId]) {
-                    playlistData = data.playlists[playlistId];
+                const pl = data.playlists[playlistId];
+                if (pl) {
+                    const loggedInUsername = localStorage.getItem('pidyn_username');
+                    const userRole = localStorage.getItem('pidyn_role');
+                    if (userRole === 'author' && pl.createdBy !== loggedInUsername) {
+                        alert("Accès refusé : Ce diaporama ne vous appartient pas.");
+                        window.location.href = '/diaporamas';
+                        return;
+                    }
+                    playlistData = pl;
                     document.getElementById('pl-name').value = playlistData.name;
-                    document.getElementById('global-bg').value = playlistData.backgroundUrl || '';
+                    const gBg = document.getElementById('global-bg');
+                    if (gBg) gBg.value = playlistData.backgroundUrl || '';
                     document.getElementById('screen-res').value = playlistData.resolution || '16/9';
-                    document.getElementById('global-bg-color').value = playlistData.backgroundColor || '#000000';
+                    const gBgColor = document.getElementById('global-bg-color');
+                    if (gBgColor) gBgColor.value = playlistData.backgroundColor || '#000000';
                     toggleGrid();
+                } else {
+                    alert("Accès refusé ou diaporama introuvable.");
+                    window.location.href = '/diaporamas';
+                    return;
                 }
             }
             updateResolution();
-            renderTimeline();
+            updatePageSelector();
+
+            if (playlistData.items && playlistData.items.length > 0) {
+                selectItem(0);
+            } else {
+                renderTimeline();
+                renderPreview();
+            }
+            updateStatusAndButtons();
+            window.addEventListener('resize', updateResolution);
         }
 
         function populateMediaSelects() {
-            // Pour le fond global, on ne garde que les images
-            const images = availableMedia.filter(m => m.type === 'image');
-            document.getElementById('global-bg').innerHTML = '<option value="">Aucun / Manuel</option>' + 
-                images.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+            const isObject = availableMedia.length > 0 && typeof availableMedia[0] === 'object';
             
-            // Ajouter les polices personnalisées au menu déroulant
-            const fontSelect = document.getElementById('z-font-family');
-            const customFonts = availableMedia.filter(m => m.type === 'font');
-            customFonts.forEach(m => {
-                const fontName = `font-${m.id}`; // Nom CSS sécurisé
-                const styleId = `font-style-${m.id}`;
-                if (!document.getElementById(styleId)) {
-                    const style = document.createElement('style');
-                    style.id = styleId;
-                    style.textContent = `@font-face { font-family: "${fontName}"; src: url("${m.url}${PREVIEW_AUTH}"); }`;
-                    document.head.appendChild(style);
-                }
+            // Background selects
+            let bgOptions = '<option value="">Aucun / Manuel</option>';
+            if (isObject) {
+                const images = availableMedia.filter(m => m.type === 'image');
                 
-                if (!Array.from(fontSelect.options).some(opt => opt.value === fontName)) {
-                    const opt = document.createElement('option');
-                    opt.value = fontName;
-                    opt.textContent = m.filename;
-                    opt.dataset.url = m.url;
-                    fontSelect.appendChild(opt);
+                // Séparer les images normales et les images de PPTX
+                const normalImages = images.filter(m => !m.parentFolderId);
+                const groupedImages = images.filter(m => m.parentFolderId);
+                
+                // Ajouter les images normales
+                bgOptions += normalImages.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+                
+                // Regrouper et ajouter les images de PPTX sous des optgroups
+                const groups = {};
+                groupedImages.forEach(m => {
+                    const groupName = m.parentFolderName || 'Import PPTX';
+                    if (!groups[groupName]) groups[groupName] = [];
+                    groups[groupName].push(m);
+                });
+                
+                for (const [groupName, items] of Object.entries(groups)) {
+                    bgOptions += `<optgroup label="${groupName}">`;
+                    bgOptions += items.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+                    bgOptions += `</optgroup>`;
                 }
-            });
+            } else {
+                bgOptions += availableMedia.map(f => `<option value="/media/${f}">${f}</option>`).join('');
+            }
+            const pageBgSelect = document.getElementById('page-bg-url');
+            if (pageBgSelect) pageBgSelect.innerHTML = bgOptions;
+            
+            // Fonts selects
+            const fontSelect = document.getElementById('z-font-family');
+            if (fontSelect && isObject) {
+                const customFonts = availableMedia.filter(m => m.type === 'font');
+                customFonts.forEach(m => {
+                    const fontName = `font-${m.id}`; // Nom CSS sécurisé
+                    const styleId = `font-style-${m.id}`;
+                    if (!document.getElementById(styleId)) {
+                        const style = document.createElement('style');
+                        style.id = styleId;
+                        style.textContent = `@font-face { font-family: "${fontName}"; src: url("${m.url}${PREVIEW_AUTH}"); }`;
+                        document.head.appendChild(style);
+                    }
+                    
+                    if (!Array.from(fontSelect.options).some(opt => opt.value === fontName)) {
+                        const opt = document.createElement('option');
+                        opt.value = fontName;
+                        opt.textContent = m.filename;
+                        opt.dataset.url = m.url;
+                        fontSelect.appendChild(opt);
+                    }
+                });
+            }
 
-            // Initialisation du select de zone (sera filtré dynamiquement par type)
             populateMediaSelectsForZone(null);
         }
 
         function populateMediaSelectsForZone(type) {
-            let filtered = availableMedia;
-            if (type === 'image') {
-                filtered = availableMedia.filter(m => m.type === 'image');
-            } else if (type === 'video') {
-                filtered = availableMedia.filter(m => m.type === 'video');
-            } else if (type === 'web') {
-                // On ne propose que les fichiers HTML (extraits ou directs)
-                filtered = availableMedia.filter(m => m.type === 'html');
-            }
-
-            const options = '<option value="">Sélectionner un média</option>' + 
-                filtered.map(m => {
-                    // On affiche le nom du ZIP d'origine pour aider à s'y retrouver
-                    const label = m.originalZip ? `[${m.originalZip}] ${m.filename}` : m.filename;
-                    return `<option value="${m.url}">${label}</option>`;
-                }).join('');
+            const select = document.getElementById('z-url');
+            if (!select) return;
             
-            document.getElementById('z-url').innerHTML = options;
+            if (availableMedia.length === 0) {
+                select.innerHTML = '<option value="">Aucun / Manuel</option>';
+                return;
+            }
+            
+            const isObject = typeof availableMedia[0] === 'object';
+            let filtered = availableMedia;
+            
+            if (isObject) {
+                if (type === 'image') {
+                    filtered = availableMedia.filter(m => m.type === 'image');
+                } else if (type === 'video') {
+                    filtered = availableMedia.filter(m => m.type === 'video');
+                } else if (type === 'web') {
+                    filtered = availableMedia.filter(m => m.type === 'html');
+                }
+                
+                if (type === 'image') {
+                    // Regrouper par PPTX
+                    const normalImages = filtered.filter(m => !m.parentFolderId);
+                    const groupedImages = filtered.filter(m => m.parentFolderId);
+                    
+                    let options = '<option value="">Aucun / Manuel</option>';
+                    options += normalImages.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+                    
+                    const groups = {};
+                    groupedImages.forEach(m => {
+                        const groupName = m.parentFolderName || 'Import PPTX';
+                        if (!groups[groupName]) groups[groupName] = [];
+                        groups[groupName].push(m);
+                    });
+                    
+                    for (const [groupName, items] of Object.entries(groups)) {
+                        options += `<optgroup label="${groupName}">`;
+                        options += items.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+                        options += `</optgroup>`;
+                    }
+                    select.innerHTML = options;
+                } else {
+                    select.innerHTML = '<option value="">Aucun / Manuel</option>' + 
+                        filtered.map(m => `<option value="${m.url}">${m.filename}</option>`).join('');
+                }
+            } else {
+                if (type === 'image') {
+                    filtered = availableMedia.filter(f => /\.(png|jpe?g|gif|svg|webp)$/i.test(f));
+                } else if (type === 'video') {
+                    filtered = availableMedia.filter(f => /\.(mp4|webm|ogg|mov)$/i.test(f));
+                } else if (type === 'web') {
+                    filtered = availableMedia.filter(f => /\.(html?)$/i.test(f));
+                }
+                
+                select.innerHTML = '<option value="">Aucun / Manuel</option>' + 
+                    filtered.map(f => `<option value="/media/${f}">${f}</option>`).join('');
+            }
         }
 
         function toggleGrid() {
@@ -354,13 +904,37 @@
             return Math.round(val / GRID_SIZE) * GRID_SIZE;
         }
 
+        // CORRECTION DE LA RESOLUTION : Maintient strict d'un ratio propre proportionnel
         function updateResolution() {
             playlistData.resolution = document.getElementById('screen-res').value;
             const screen = document.getElementById('preview-screen');
-            const ratio = (playlistData.resolution || "16/9").split('/');
-            const baseHeight = 400; 
-            screen.style.height = baseHeight + 'px';
-            screen.style.width = (baseHeight * (ratio[0]/ratio[1])) + 'px';
+            const ratio = playlistData.resolution.split('/');
+            
+            const previewArea = document.getElementById('drop-zone');
+            if (previewArea) {
+                const rect = previewArea.getBoundingClientRect();
+                const maxWidth = Math.max(100, rect.width - 40);
+                const maxHeight = Math.max(100, rect.height - 40);
+                
+                const wRatio = parseInt(ratio[0]);
+                const hRatio = parseInt(ratio[1]);
+                
+                let w = maxWidth;
+                let h = maxWidth * (hRatio / wRatio);
+                
+                if (h > maxHeight) {
+                    h = maxHeight;
+                    w = maxHeight * (wRatio / hRatio);
+                }
+                
+                screen.style.width = w + 'px';
+                screen.style.height = h + 'px';
+            } else {
+                const baseHeight = 450; 
+                screen.style.height = baseHeight + 'px';
+                screen.style.width = (baseHeight * (parseInt(ratio[0]) / parseInt(ratio[1]))) + 'px';
+            }
+            renderPreview();
         }
 
         function updateGlobalBg() {
@@ -373,85 +947,359 @@
             renderPreview();
         }
 
-        function renderTimeline() {
-            const container = document.getElementById('timeline-list');
-            container.innerHTML = '';
+        let isSidebarVisible = true;
+        let isTimelineVisible = true;
 
-            playlistData.items.forEach((item, index) => {
-                const div = document.createElement('div');
-                div.className = `timeline-item ${selectedIndex === index ? 'active' : ''}`;
-                div.draggable = true;
-                div.onclick = () => selectItem(index);
+        function toggleSidebar() {
+            isSidebarVisible = !isSidebarVisible;
+            const body = document.body;
+            const sidebarBtn = document.getElementById('btn-toggle-sidebar');
+            const arrowBtn = document.getElementById('sidebar-toggle-arrow');
+            
+            if (isSidebarVisible) {
+                body.classList.remove('sidebar-collapsed');
+                if (sidebarBtn) sidebarBtn.style.background = '#3498db';
+                if (arrowBtn) arrowBtn.innerHTML = '▶';
+            } else {
+                body.classList.add('sidebar-collapsed');
+                if (sidebarBtn) sidebarBtn.style.background = '#34495e';
+                if (arrowBtn) arrowBtn.innerHTML = '◀';
+            }
+            // Trigger recalculation after style updates apply to layout flow
+            setTimeout(updateResolution, 10);
+        }
 
-                div.ondragstart = (e) => {
-                    e.dataTransfer.setData('text/plain', index);
-                    div.style.opacity = '0.5';
-                    container.classList.add('dragging');
-                };
-                div.ondragend = () => {
-                    div.style.opacity = '1';
-                    container.classList.remove('dragging');
-                    document.querySelectorAll('.timeline-item').forEach(i => i.classList.remove('drag-over'));
-                };
-                div.ondragover = (e) => {
-                    e.preventDefault();
-                    div.classList.add('drag-over');
-                };
-                div.ondragleave = () => {
-                    div.classList.remove('drag-over');
-                };
-                div.ondrop = (e) => {
-                    e.preventDefault();
-                    div.classList.remove('drag-over');
-                    const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-                    if (fromIndex !== index) {
-                        const movedItem = playlistData.items.splice(fromIndex, 1)[0];
-                        playlistData.items.splice(index, 0, movedItem);
-                        
-                        // Ajuster l'index sélectionné pour qu'il suive l'élément ou reste sur le bon
-                        if (selectedIndex === fromIndex) {
-                            selectedIndex = index;
-                        } else if (selectedIndex > fromIndex && selectedIndex <= index) {
-                            selectedIndex--;
-                        } else if (selectedIndex < fromIndex && selectedIndex >= index) {
-                            selectedIndex++;
-                        }
-                        renderTimeline();
-                        renderPreview();
-                    }
-                };
+        function toggleTimeline() {
+            isTimelineVisible = !isTimelineVisible;
+            const body = document.body;
+            const timelineBtn = document.getElementById('btn-toggle-timeline');
+            const arrowBtn = document.getElementById('timeline-toggle-arrow');
+            
+            if (isTimelineVisible) {
+                body.classList.remove('timeline-collapsed');
+                if (timelineBtn) timelineBtn.style.background = '#3498db';
+                if (arrowBtn) arrowBtn.innerHTML = '▼';
+            } else {
+                body.classList.add('timeline-collapsed');
+                if (timelineBtn) timelineBtn.style.background = '#34495e';
+                if (arrowBtn) arrowBtn.innerHTML = '▲';
+            }
+            // Trigger recalculation after style updates apply to layout flow
+            setTimeout(updateResolution, 10);
+        }
 
-                const thumb = (item.zones && item.zones.length > 0) ? item.zones[0].url : null;
-                div.innerHTML = `
-                    <button class="delete-btn" onclick="event.stopPropagation(); deleteCurrentItemByIndex(${index})">×</button>
-                    <button class="duplicate-btn" onclick="event.stopPropagation(); duplicateItemByIndex(${index})" title="Dupliquer">⧉</button>
-                    ${thumb ? `<img src="${thumb}${PREVIEW_AUTH}">` : '<div style="height:40px"></div>'}
-                    <span>${item.duration/1000}s</span>
-                `;
-                container.appendChild(div);
-            });
+        function switchSidebarTab(tabName) {
+            const tabPage = document.getElementById('tab-page');
+            const tabZone = document.getElementById('tab-zone');
+            const pageContent = document.getElementById('sidebar-page-content');
+            const zoneContent = document.getElementById('sidebar-zone-content');
+            
+            if (tabName === 'page') {
+                if (tabPage) {
+                    tabPage.classList.add('active');
+                    tabPage.style.color = '#3498db';
+                    tabPage.style.borderBottomColor = '#3498db';
+                }
+                if (tabZone) {
+                    tabZone.classList.remove('active');
+                    tabZone.style.color = '#bdc3c7';
+                    tabZone.style.borderBottomColor = 'transparent';
+                }
+                if (pageContent) pageContent.style.display = 'block';
+                if (zoneContent) zoneContent.style.display = 'none';
+            } else if (tabName === 'zone') {
+                if (tabPage) {
+                    tabPage.classList.remove('active');
+                    tabPage.style.color = '#bdc3c7';
+                    tabPage.style.borderBottomColor = 'transparent';
+                }
+                if (tabZone) {
+                    tabZone.classList.add('active');
+                    tabZone.style.color = '#3498db';
+                    tabZone.style.borderBottomColor = '#3498db';
+                }
+                if (pageContent) pageContent.style.display = 'none';
+                if (zoneContent) zoneContent.style.display = 'block';
+            }
+        }
+
+        function updatePageSelector() {
+            const select = document.getElementById('page-selector');
+            if (!playlistData.items || playlistData.items.length === 0) {
+                select.innerHTML = '<option value="-1">-- Aucune page --</option>';
+                return;
+            }
+            select.innerHTML = playlistData.items.map((item, idx) => 
+                `<option value="${idx}" ${selectedIndex === idx ? 'selected' : ''}>Page ${idx + 1} (${item.duration / 1000}s)</option>`
+            ).join('');
         }
 
         function selectItem(index) {
             selectedIndex = index;
             selectedZoneIndex = -1;
+            document.getElementById('zone-editor').style.display = 'none';
+            document.getElementById('no-zone-message').style.display = 'block';
             
-            const item = playlistData.items[selectedIndex];
-            document.getElementById('page-editor').style.display = 'block';
-            document.getElementById('page-duration').value = item.duration;
-            document.getElementById('page-bg-color').value = item.backgroundColor || '#000000';
-
-            if (item.template) {
-                document.getElementById('template-editor').style.display = 'block';
-                document.getElementById('zone-editor').style.display = 'none';
-                renderTemplateFields(item);
+            if (index !== -1 && playlistData.items[index]) {
+                const item = playlistData.items[index];
+                document.getElementById('page-editor').style.display = 'block';
+                document.getElementById('page-duration').value = item.duration || 5000;
+                document.getElementById('page-bg-url').value = item.backgroundUrl || '';
+                document.getElementById('page-bg-color').value = item.backgroundColor || '#000000';
+                document.getElementById('no-page-message').style.display = 'none';
+                
+                if (item.template) {
+                    document.getElementById('template-editor').style.display = 'block';
+                    renderTemplateFields(item);
+                } else {
+                    document.getElementById('template-editor').style.display = 'none';
+                }
             } else {
+                document.getElementById('page-editor').style.display = 'none';
                 document.getElementById('template-editor').style.display = 'none';
-                document.getElementById('zone-editor').style.display = 'none';
+                document.getElementById('no-page-message').style.display = 'block';
             }
-
+            
+            // Auto-sélectionner l'onglet Page
+            switchSidebarTab('page');
+            
+            updatePageSelector();
             renderPreview();
             renderTimeline();
+        }
+
+        function toggleSlideTypeMenu(e) {
+            e.stopPropagation();
+            const dropdown = document.getElementById('slide-type-dropdown');
+            if (dropdown.style.display === 'flex') {
+                dropdown.style.display = 'none';
+            } else {
+                dropdown.style.display = 'flex';
+                clearDropdownHelpText();
+            }
+        }
+
+        function setDropdownHelpText(text) {
+            const el = document.getElementById('dropdown-help-text');
+            if (el) el.innerText = text;
+        }
+
+        function clearDropdownHelpText() {
+            const el = document.getElementById('dropdown-help-text');
+            if (el) el.innerText = 'Survolez une icône...';
+        }
+
+        window.addEventListener('click', () => {
+            const dropdown = document.getElementById('slide-type-dropdown');
+            if (dropdown) dropdown.style.display = 'none';
+        });
+
+        function triggerPptxImport() {
+            document.getElementById('pptx-import-input').click();
+        }
+
+        function openPptxSelectModal() {
+            const modal = document.getElementById('pptx-select-modal');
+            const listContainer = document.getElementById('pptx-select-list');
+            listContainer.innerHTML = '';
+            
+            // Extraire les dossiers PPTX uniques
+            const pptxFolders = {};
+            availableMedia.forEach(m => {
+                if (m.parentFolderId) {
+                    if (!pptxFolders[m.parentFolderId]) {
+                        pptxFolders[m.parentFolderId] = {
+                            name: m.parentFolderName || 'Import PPTX',
+                            slides: []
+                        };
+                    }
+                    pptxFolders[m.parentFolderId].slides.push(m);
+                }
+            });
+            
+            const folderIds = Object.keys(pptxFolders);
+            if (folderIds.length === 0) {
+                listContainer.innerHTML = '<div style="color: #bdc3c7; text-align: center; padding: 20px;">Aucun PowerPoint disponible dans la médiathèque.</div>';
+            } else {
+                folderIds.forEach(folderId => {
+                    const folder = pptxFolders[folderId];
+                    // Trier les slides par nom de fichier numériquement
+                    folder.slides.sort((a, b) => 
+                        a.filename.localeCompare(b.filename, undefined, {numeric: true, sensitivity: 'base'})
+                    );
+                    
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.style.background = '#2c3e50';
+                    btn.style.border = '1px solid #34495e';
+                    btn.style.color = 'white';
+                    btn.style.padding = '10px 15px';
+                    btn.style.borderRadius = '4px';
+                    btn.style.cursor = 'pointer';
+                    btn.style.textAlign = 'left';
+                    btn.style.display = 'flex';
+                    btn.style.justifyContent = 'space-between';
+                    btn.style.alignItems = 'center';
+                    btn.style.transition = 'background 0.2s';
+                    btn.style.margin = '0';
+                    
+                    btn.onmouseover = () => btn.style.background = '#34495e';
+                    btn.onmouseout = () => btn.style.background = '#2c3e50';
+                    
+                    btn.onclick = () => {
+                        importExistingPptx(folder.slides, folder.name);
+                        closePptxSelectModal();
+                    };
+                    
+                    btn.innerHTML = `
+                        <span style="font-weight: bold; color: white;">📊 ${folder.name}</span>
+                        <span style="font-size: 11px; background: #9b59b6; color: white; padding: 2px 6px; border-radius: 10px;">${folder.slides.length} slides</span>
+                    `;
+                    listContainer.appendChild(btn);
+                });
+            }
+            
+            modal.style.display = 'flex';
+        }
+
+        function closePptxSelectModal() {
+            document.getElementById('pptx-select-modal').style.display = 'none';
+        }
+
+        function importExistingPptx(slides, folderName) {
+            saveStateForUndo();
+            playlistData.items = playlistData.items || [];
+            const startIdx = playlistData.items.length;
+            
+            const newItems = slides.map(slide => {
+                return {
+                    duration: 10000,
+                    backgroundColor: '#000000',
+                    backgroundUrl: slide.url,
+                    zones: []
+                };
+            });
+            
+            playlistData.items.push(...newItems);
+            selectItem(startIdx);
+            
+            alert(`Importé : ${newItems.length} diapositives du PowerPoint "${folderName}" ont été ajoutées.`);
+        }
+
+        function importPptxInEditor() {
+            const input = document.getElementById('pptx-import-input');
+            if (!input.files.length) return;
+            const file = input.files[0];
+            
+            const overlay = document.getElementById('editor-loading-overlay');
+            const titleEl = document.getElementById('pptx-loading-title');
+            const textEl = document.getElementById('pptx-loading-text');
+            const progressContainer = document.getElementById('pptx-progress-container');
+            const progressBar = document.getElementById('pptx-progress-bar');
+            
+            titleEl.innerText = "Téléversement du fichier PowerPoint...";
+            textEl.innerText = "Veuillez patienter...";
+            progressBar.style.width = "0%";
+            progressContainer.style.display = "block";
+            overlay.style.display = 'flex';
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/admin/import-pptx', true);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentComplete + "%";
+                    titleEl.innerText = `Téléversement : ${percentComplete}%`;
+                    if (percentComplete === 100) {
+                        titleEl.innerText = "Traitement et conversion en cours...";
+                        textEl.innerText = "Conversion des diapositives via LibreOffice et pdftocairo. Cette opération peut durer quelques instants...";
+                    }
+                }
+            };
+            
+            xhr.onload = async function() {
+                progressContainer.style.display = "none";
+                overlay.style.display = 'none';
+                
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        if (result.items && result.items.length > 0) {
+                            saveStateForUndo();
+                            playlistData.items = playlistData.items || [];
+                            const startIdx = playlistData.items.length;
+                            
+                            playlistData.items.push(...result.items);
+                            selectItem(startIdx);
+                            
+                            const mediaRes = await fetch('/api/admin/media', { headers: { 'Authorization': `Bearer ${token}` } });
+                            if (mediaRes.ok) {
+                                availableMedia = await mediaRes.json();
+                                populateMediaSelects();
+                            }
+                            
+                            alert(`Importé : ${result.items.length} diapositives du PowerPoint ont été ajoutées.`);
+                        } else {
+                            alert("Aucune diapositive importée.");
+                        }
+                    } catch (e) {
+                        alert("Erreur lors de la lecture du résultat de l'importation.");
+                    }
+                } else {
+                    alert("Erreur lors de l'importation : " + xhr.responseText);
+                }
+                input.value = ''; // Reset input
+            };
+            
+            xhr.onerror = function() {
+                progressContainer.style.display = "none";
+                overlay.style.display = 'none';
+                alert("Erreur réseau ou serveur inaccessible lors de l'importation.");
+                input.value = ''; // Reset input
+            };
+            
+            xhr.send(formData);
+        }
+
+        function addSlideWithType(type) {
+            saveStateForUndo();
+            playlistData.items = playlistData.items || [];
+            
+            const defaults = {
+                canteen: { title: 'Menu du Jour', starter: 'Salade', main: 'Plat principal', dessert: 'Fruits', useLiveMenu: false },
+                meeting: { room: 'Salle de Réunion', subject: 'Sujet de la réunion', status: 'Disponible' },
+                video_fullscreen: { 
+                    videoUrl: '', 
+                    loop: false, 
+                    muted: false, 
+                    fitMode: 'contain', 
+                    legend: '', 
+                    legendColor: '#ffffff', 
+                    legendFontSize: 30, 
+                    legendFontFamily: 'sans-serif' 
+                },
+                weather: { city: 'Paris', lat: '48.8566', lon: '2.3522' }
+            };
+
+            const duration = (type === 'empty') ? 5000 : 10000;
+            const newItem = {
+                duration: duration,
+                backgroundColor: '#000000',
+                zones: []
+            };
+
+            if (type !== 'empty') {
+                newItem.template = type;
+                newItem.data = defaults[type];
+            }
+
+            playlistData.items.push(newItem);
+            selectItem(playlistData.items.length - 1);
         }
 
         function renderTemplateFields(item) {
@@ -470,21 +1318,70 @@
                     { key: 'room', label: 'Nom de la salle', type: 'text' },
                     { key: 'subject', label: 'Sujet', type: 'text' },
                     { key: 'status', label: 'Statut', type: 'select', options: ['Disponible', 'Occupée'] }
+                ],
+                video_fullscreen: [
+                    { key: 'videoUrl', label: 'Vidéo', type: 'video_select' },
+                    { key: 'loop', label: 'Boucler (ignore la fin)', type: 'checkbox' },
+                    { key: 'muted', label: 'Muet', type: 'checkbox' },
+                    { key: 'fitMode', label: 'Ajustement vidéo', type: 'select', options: ['cover', 'contain'] },
+                    { key: 'legend', label: 'Légende', type: 'text' },
+                    { key: 'legendFontFamily', label: 'Police légende', type: 'font_select' },
+                    { key: 'legendFontSize', label: 'Taille légende (px)', type: 'number' },
+                    { key: 'legendColor', label: 'Couleur légende', type: 'color' }
+                ],
+                weather: [
+                    { key: 'city', label: 'Ville (Affichage)', type: 'text' },
+                    { key: 'lat', label: 'Latitude', type: 'text' },
+                    { key: 'lon', label: 'Longitude', type: 'text' }
                 ]
             };
+
+            if (!configs[item.template]) return;
 
             configs[item.template].forEach(field => {
                 const label = document.createElement('label');
                 label.innerText = field.label;
+                label.style.display = 'block';
+                label.style.marginTop = '10px';
+                label.style.fontWeight = 'bold';
+                
                 let input;
                 if (field.type === 'select') {
                     input = document.createElement('select');
                     field.options.forEach(opt => {
                         const o = document.createElement('option');
                         o.value = opt; o.text = opt;
-                        if (item.data[field.key] === opt) o.selected = true;
+                        if ((item.data[field.key] || field.options[0]) === opt) o.selected = true;
                         input.add(o);
                     });
+                } else if (field.type === 'video_select') {
+                    input = document.createElement('select');
+                    const isObject = availableMedia.length > 0 && typeof availableMedia[0] === 'object';
+                    const videos = isObject ? availableMedia.filter(m => m.type === 'video') : availableMedia.filter(f => /\.(mp4|webm|ogg|mov)$/i.test(f));
+                    
+                    input.innerHTML = '<option value="">Sélectionner une vidéo</option>' + 
+                        videos.map(m => {
+                            const val = isObject ? m.url : `/media/${m}`;
+                            const label = isObject ? m.filename : m;
+                            return `<option value="${val}" ${item.data[field.key] === val ? 'selected' : ''}>${label}</option>`;
+                        }).join('');
+                } else if (field.type === 'font_select') {
+                    input = document.createElement('select');
+                    const isObject = availableMedia.length > 0 && typeof availableMedia[0] === 'object';
+                    const fonts = isObject ? availableMedia.filter(m => m.type === 'font') : [];
+                    
+                    input.innerHTML = '<option value="sans-serif">Sans-serif (Défaut)</option>' + 
+                        fonts.map(m => `<option value="font-${m.id}" ${item.data[field.key] === 'font-'+m.id ? 'selected' : ''}>${m.filename}</option>`).join('');
+                } else if (field.type === 'number') {
+                    input = document.createElement('input');
+                    input.type = 'number';
+                    input.value = item.data[field.key] || 24;
+                } else if (field.type === 'color') {
+                    input = document.createElement('input');
+                    input.type = 'color';
+                    input.value = item.data[field.key] || '#ffffff';
+                    input.style.height = '30px';
+                    input.style.padding = '0';
                 } else if (field.type === 'checkbox') {
                     input = document.createElement('input');
                     input.type = 'checkbox';
@@ -495,7 +1392,8 @@
                     input.type = 'text';
                     input.value = item.data[field.key] || '';
                 }
-                input.onchange = (e) => { 
+                
+                input.oninput = (e) => { 
                     item.data[field.key] = field.type === 'checkbox' ? e.target.checked : e.target.value; 
                     renderPreview(); 
                 };
@@ -504,31 +1402,253 @@
             });
         }
 
+        function renderTimeline() {
+            const container = document.getElementById('tracks-container');
+            container.innerHTML = '';
+
+            if (!playlistData.items || playlistData.items.length === 0) {
+                container.innerHTML = `
+                    <div style="padding: 35px; text-align: center; color: #bdc3c7; width: 100%;">
+                        <p style="margin-bottom: 12px;">Votre diaporama ne contient aucune page pour le moment.</p>
+                        <div style="position: relative; display: inline-block;">
+                            <button onclick="addSlideWithType('empty')" style="padding: 8px 20px; background: #27ae60; font-size: 13px; font-weight: bold;">
+                                🚀 Créer la première page
+                            </button>
+                        </div>
+                    </div>`;
+                return;
+            }
+
+            // Total duration of all pages
+            const totalDuration = playlistData.items.reduce((sum, item) => sum + (item.duration || 5000), 0);
+
+            // 1. Piste des Diapositives (Slides Track)
+            const slidesTrack = document.createElement('div');
+            slidesTrack.className = 'timeline-track';
+            slidesTrack.style.width = `calc(200px + (100% - 200px) * ${timelineZoom})`;
+            
+            // Header for slides track
+            let slidesHeaderHtml = `
+                <div class="track-header" style="background: #1e2d3b; border-bottom: 2px solid #27ae60;">
+                    <strong>Diapositives</strong>
+                </div>
+            `;
+            
+            // Build the slides timeline blocks
+            let slidesTimelineHtml = `<div class="track-timeline" style="background: #111a24; overflow-x: clip;">`;
+            let accumulatedMs = 0;
+            playlistData.items.forEach((item, index) => {
+                const startPct = (accumulatedMs / totalDuration) * 100;
+                const widthPct = ((item.duration || 5000) / totalDuration) * 100;
+                accumulatedMs += (item.duration || 5000);
+                
+                const isActive = index === selectedIndex;
+                const borderStyle = isActive ? 'border: 2px solid #27ae60; background: #2ebd7a; color: white;' : 'background: #27ae60; opacity: 0.8;';
+                const label = item.template ? `Diapo ${index+1} [${item.template}]` : `Diapo ${index+1} (Zones)`;
+                const thumbHtml = getSlideThumbnail(item);
+                
+                slidesTimelineHtml += `
+                    <div class="timeline-block page-block" 
+                         style="left: ${startPct}%; width: ${widthPct}%; ${borderStyle} display: flex; align-items: center; gap: 6px; padding: 0 6px;"
+                         draggable="true"
+                         onclick="selectItem(${index})"
+                         ondragstart="handleSlideDragStart(event, ${index})"
+                         ondragover="handleSlideDragOver(event)"
+                         ondragleave="handleSlideDragLeave(event)"
+                         ondrop="handleSlideDrop(event, ${index})"
+                         title="Sélectionner / Glisser pour réordonner">
+                        ${thumbHtml}
+                        <span style="font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${label} (${item.duration / 1000}s)</span>
+                        <div class="resizer-h" onmousedown="event.stopPropagation(); startSlideResize(event, ${index})"></div>
+                    </div>
+                `;
+            });
+            slidesTimelineHtml += `</div>`;
+            
+            slidesTrack.innerHTML = slidesHeaderHtml + slidesTimelineHtml;
+            container.appendChild(slidesTrack);
+
+            // 2. Divider / Title for Layers of the active slide
+            if (selectedIndex === -1) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.style.cssText = "padding: 20px; text-align: center; color: #bdc3c7;";
+                emptyMsg.innerText = "Sélectionnez une diapositive ci-dessus pour afficher et modifier ses calques.";
+                container.appendChild(emptyMsg);
+                return;
+            }
+
+            const activeItem = playlistData.items[selectedIndex];
+            const activePageDuration = activeItem.duration || 5000;
+
+            // Draw layers tracks header and blocks
+            if (activeItem.template) {
+                const templateMsg = document.createElement('div');
+                templateMsg.className = 'timeline-track';
+                templateMsg.style.width = `calc(200px + (100% - 200px) * ${timelineZoom})`;
+                templateMsg.innerHTML = `
+                    <div class="track-header" style="background: #1e2d3b;">
+                        <span>Modèle Actif</span>
+                    </div>
+                    <div class="track-timeline" style="display:flex; align-items:center; justify-content:center; color:#bdc3c7; font-size:11px;">
+                        Cette diapositive utilise le modèle [${activeItem.template}]. Les calques ne sont pas configurables pour ce modèle.
+                    </div>
+                `;
+                container.appendChild(templateMsg);
+            } else if (!activeItem.zones || activeItem.zones.length === 0) {
+                const noLayersTrack = document.createElement('div');
+                noLayersTrack.className = 'timeline-track';
+                noLayersTrack.style.width = `calc(200px + (100% - 200px) * ${timelineZoom})`;
+                noLayersTrack.innerHTML = `
+                    <div class="track-header" style="background: #1e2d3b;">
+                        <span>Aucun calque</span>
+                    </div>
+                    <div class="track-timeline" style="display:flex; align-items:center; justify-content:center; color:#bdc3c7; font-size:11px;">
+                        Dessinez une zone sur l'aperçu pour créer le premier calque.
+                    </div>
+                `;
+                container.appendChild(noLayersTrack);
+            } else {
+                let accumulatedMsBeforeActive = 0;
+                for (let i = 0; i < selectedIndex; i++) {
+                    accumulatedMsBeforeActive += (playlistData.items[i].duration || 5000);
+                }
+
+                activeItem.zones.forEach((zone, idx) => {
+                    if (zone.start === undefined) zone.start = 0;
+                    if (zone.duration === undefined) zone.duration = activePageDuration;
+
+                    const leftPct = ((accumulatedMsBeforeActive + zone.start) / totalDuration) * 100;
+                    const widthPct = (zone.duration / totalDuration) * 100;
+
+                    const track = document.createElement('div');
+                    track.className = 'timeline-track';
+                    track.style.width = `calc(200px + (100% - 200px) * ${timelineZoom})`;
+                    
+                    const isSelected = selectedZoneIndex === idx;
+                    const headerStyle = isSelected ? 'background: #2980b9; color: white;' : 'background: #16202c;';
+                    const blockStyle = isSelected ? 'box-shadow: 0 0 0 2px #ffffff; background: #3498db;' : 'background: #3498db; opacity: 0.85;';
+                    const zoneLabel = zone.text ? zone.text.substring(0, 15) : (zone.url ? zone.url.split('/').pop() : zone.type);
+
+                    const zoneThumbHtml = getZoneThumbnail(zone);
+
+                    track.innerHTML = `
+                        <div class="track-header" style="${headerStyle} display: flex; align-items: center; justify-content: space-between;" onclick="selectZone(${idx})">
+                            <span style="font-weight: 500; font-size:11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">Calque ${idx + 1} [${zone.type}]</span>
+                            <div style="display: flex; gap: 2px;">
+                                <button onclick="event.stopPropagation(); moveZoneForIndex(${idx}, -1)" style="padding: 2px 4px; background: #34495e; font-size: 9px; border-radius: 3px; color: white;" title="Monter le calque" ${idx === 0 ? 'disabled style="opacity:0.3; pointer-events:none;"' : ''}>▲</button>
+                                <button onclick="event.stopPropagation(); moveZoneForIndex(${idx}, 1)" style="padding: 2px 4px; background: #34495e; font-size: 9px; border-radius: 3px; color: white;" title="Descendre le calque" ${idx === activeItem.zones.length - 1 ? 'disabled style="opacity:0.3; pointer-events:none;"' : ''}>▼</button>
+                                <button onclick="event.stopPropagation(); deleteZoneByIndex(${idx})" style="padding: 2px 5px; background: #e74c3c; font-size: 10px; border-radius: 3px; color: white; border: none; cursor: pointer;" title="Supprimer le calque">×</button>
+                            </div>
+                        </div>
+                        <div class="track-timeline" onclick="selectZone(${idx})">
+                            <div class="timeline-block" 
+                                 style="left: ${leftPct}%; width: ${widthPct}%; ${blockStyle} display: flex; align-items: center; gap: 6px; padding: 0 6px;"
+                                 onmousedown="event.stopPropagation(); startLayerMove(event, ${idx})">
+                                ${zoneThumbHtml}
+                                <span style="font-weight: 500; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">${zoneLabel}</span>
+                                <div class="resizer-h" onmousedown="event.stopPropagation(); startLayerResize(event, ${idx})"></div>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(track);
+                });
+            }
+        }
+
+        function handleSlideDragStart(e, index) {
+            e.dataTransfer.setData('text/plain', index);
+            e.currentTarget.style.opacity = '0.5';
+        }
+
+        function handleSlideDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function handleSlideDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleSlideDrop(e, index) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+            if (fromIndex !== index) {
+                saveStateForUndo();
+                const movedItem = playlistData.items.splice(fromIndex, 1)[0];
+                playlistData.items.splice(index, 0, movedItem);
+                
+                // Adjust selectedIndex
+                if (selectedIndex === fromIndex) {
+                    selectedIndex = index;
+                } else if (selectedIndex > fromIndex && selectedIndex <= index) {
+                    selectedIndex--;
+                } else if (selectedIndex < fromIndex && selectedIndex >= index) {
+                    selectedIndex++;
+                }
+                selectItem(selectedIndex);
+            }
+        }
+
+        function startSlideResize(e, idx) {
+            e.stopPropagation();
+            saveStateForUndo();
+            timelineMode = 'resizing-slide';
+            activeSlideIdx = idx;
+            timelineStartX = e.clientX;
+            initialBlockDuration = playlistData.items[idx].duration || 5000;
+        }
+
+        function startLayerMove(e, idx) {
+            e.stopPropagation();
+            saveStateForUndo();
+            selectZone(idx);
+            timelineMode = 'moving-layer';
+            activeZoneIdx = idx;
+            timelineStartX = e.clientX;
+            initialBlockStart = playlistData.items[selectedIndex].zones[idx].start || 0;
+        }
+
+        function startLayerResize(e, idx) {
+            e.stopPropagation();
+            saveStateForUndo();
+            selectZone(idx);
+            timelineMode = 'resizing-layer';
+            activeZoneIdx = idx;
+            timelineStartX = e.clientX;
+            initialBlockDuration = playlistData.items[selectedIndex].zones[idx].duration || (playlistData.items[selectedIndex].duration || 5000);
+        }
+
         function renderPreview() {
             const screen = document.getElementById('preview-screen');
-            
             const item = selectedIndex !== -1 ? playlistData.items[selectedIndex] : null;
             const bgColor = (item && item.backgroundColor) ? item.backgroundColor : (playlistData.backgroundColor || 'black');
             screen.style.backgroundColor = bgColor;
             
-            // Gérer le calque de fond sans tout effacer
+            // Image de fond
             let bgLayer = screen.querySelector('.bg-layer');
-            if (playlistData.backgroundUrl) {
+            const pageBgUrl = (item && item.backgroundUrl) ? item.backgroundUrl : (playlistData.backgroundUrl || '');
+            if (pageBgUrl) {
                 if (!bgLayer) {
                     bgLayer = document.createElement('img');
                     bgLayer.className = 'bg-layer';
-                    bgLayer.draggable = false;
                     screen.prepend(bgLayer);
                 }
-                bgLayer.src = playlistData.backgroundUrl + PREVIEW_AUTH;
+                bgLayer.src = pageBgUrl + PREVIEW_AUTH;
                 bgLayer.style.display = 'block';
             } else if (bgLayer) {
                 bgLayer.style.display = 'none';
             }
             
             const tplLayer = document.getElementById('template-preview-layer');
+            if (tplLayer) {
+                tplLayer.innerHTML = '';
+                tplLayer.style.display = 'none';
+            }
+            
             if (item && item.template) {
                 tplLayer.style.display = 'flex';
+                tplLayer.style.padding = item.template === 'video_fullscreen' ? '0' : '20px';
                 if (item.template === 'canteen') {
                     tplLayer.innerHTML = `
                         <div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px; padding-bottom:5px;">${item.data.title || 'MENU'}</div>
@@ -542,147 +1662,332 @@
                         <div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${item.data.room}</div>
                         <div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${item.data.subject}</div>
                         <div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${item.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${item.data.status}</div>`;
+                } else if (item.template === 'video_fullscreen') {
+                    const isMuted = item.data.muted === true;
+                    let html = item.data.videoUrl 
+                        ? `<video src="${item.data.videoUrl}${PREVIEW_AUTH}" autoplay playsinline muted style="width:100%; height:100%; object-fit:${item.data.fitMode || 'cover'}; pointer-events:none;"></video>`
+                        : `<div style="color:#bdc3c7;">Aucune vidéo sélectionnée</div>`;
+                    if (item.data.legend) {
+                        const legendStyle = `
+                            position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.6); 
+                            color:${item.data.legendColor || 'white'}; 
+                            font-size:${(item.data.legendFontSize || 24) / 2}px; 
+                            font-family:${item.data.legendFontFamily || 'sans-serif'};
+                            padding:5px; text-align:center;
+                        `;
+                        html += `<div style="${legendStyle}">${item.data.legend}</div>`;
+                    }
+                    tplLayer.innerHTML = html;
+                    const v = tplLayer.querySelector('video');
+                    if (v && item.data.videoUrl) {
+                        v.play().then(() => {
+                            if (!isMuted) v.muted = false;
+                        }).catch(e => console.warn("Lancement aperçu vidéo échoué:", e));
+                    }
+                    tplLayer.style.padding = '0';
+                    tplLayer.style.justifyContent = 'center'; 
+                    tplLayer.style.alignItems = 'center'; 
+                } else if (item.template === 'weather') {
+                    const city = item.data.city || 'Paris';
+                    const lat = item.data.lat || '48.8566';
+                    const lon = item.data.lon || '2.3522';
+                    const cacheKey = `${lat}_${lon}`;
+                    
+                    if (weatherCache[cacheKey]) {
+                        if (weatherCache[cacheKey] === 'loading') {
+                            tplLayer.innerHTML = `
+                                <div style="color:#3498db; font-weight:bold; font-size:24px; margin-bottom:15px;">MÉTÉO - ${city.toUpperCase()}</div>
+                                <div style="color:#bdc3c7;">Chargement des prévisions...</div>`;
+                        } else if (weatherCache[cacheKey] === 'error') {
+                            tplLayer.innerHTML = `
+                                <div style="color:#3498db; font-weight:bold; font-size:24px; margin-bottom:15px;">MÉTÉO - ${city.toUpperCase()}</div>
+                                <div style="color:#e74c3c; font-weight:bold;">Météo indisponible</div>`;
+                        } else {
+                            const data = weatherCache[cacheKey];
+                            const periods = [
+                                { label: 'MATIN', timeLabel: '9h', index: 9 },
+                                { label: 'MIDI', timeLabel: '12h', index: 12 },
+                                { label: 'APRÈS-MIDI', timeLabel: '16h', index: 16 }
+                            ];
+                            let html = `
+                                <div style="color:#3498db; font-weight:bold; font-size:24px; margin-bottom:15px;">MÉTÉO - ${city.toUpperCase()}</div>
+                                <div style="display:flex; gap:10px; justify-content:center; width:90%;">`;
+                            periods.forEach(p => {
+                                const icon = getWeatherIcon(data.hourly.weathercode[p.index]);
+                                const temp = Math.round(data.hourly.temperature_2m[p.index]);
+                                html += `
+                                    <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:10px; flex:1; text-align:center; font-size:12px;">
+                                        <div style="font-weight:bold; color:#3498db; margin-bottom:2px;">${p.label}</div>
+                                        <div style="font-size:10px; opacity:0.6; margin-bottom:5px;">${p.timeLabel}</div>
+                                        <div style="font-size:24px; margin:5px 0;">${icon}</div>
+                                        <div style="font-weight:bold; font-size:13px;">${temp}°</div>
+                                    </div>`;
+                            });
+                            html += `</div>`;
+                            tplLayer.innerHTML = html;
+                        }
+                    } else {
+                        weatherCache[cacheKey] = 'loading';
+                        tplLayer.innerHTML = `
+                            <div style="color:#3498db; font-weight:bold; font-size:24px; margin-bottom:15px;">MÉTÉO - ${city.toUpperCase()}</div>
+                            <div style="color:#bdc3c7;">Chargement des prévisions...</div>`;
+                        
+                        fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode,temperature_2m&timezone=auto`)
+                            .then(r => r.json())
+                            .then(data => {
+                                weatherCache[cacheKey] = data;
+                                renderPreview();
+                            })
+                            .catch(err => {
+                                console.error("Error fetching weather forecast:", err);
+                                weatherCache[cacheKey] = 'error';
+                                renderPreview();
+                            });
+                    }
                 }
-            } else {
-                tplLayer.style.display = 'none';
             }
-
-            if (selectedIndex === -1) {
-                document.querySelectorAll('.screen-mockup .zone').forEach(z => z.remove());
-                return;
-            }
-
-            // Supprimer les zones qui ne sont plus dans les données
-            const currentZoneIds = (item.zones || []).map((_, i) => `zone-render-${i}`);
-            document.querySelectorAll('.screen-mockup .zone').forEach(z => {
-                if (!currentZoneIds.includes(z.id)) z.remove();
-            });
-
+            
+            // Nettoyer les zones de rendu précédentes
+            const zoneDivs = Array.from(screen.querySelectorAll('.zone'));
+            zoneDivs.forEach(div => div.remove());
+            
+            if (selectedIndex === -1 || !item || item.template) return;
+ 
             if (item.zones) {
                 item.zones.forEach((zone, idx) => {
-                    const zoneId = `zone-render-${idx}`;
-                    let div = document.getElementById(zoneId);
-                    
-                    const isInteracting = (mode === 'moving' || mode === 'resizing') && selectedZoneIndex === idx;
-
-                    if (!div) {
-                        div = document.createElement('div');
-                        div.id = zoneId;
-                        screen.appendChild(div);
-                    }
-
+                    const div = document.createElement('div');
                     div.className = `zone ${selectedZoneIndex === idx ? 'selected' : ''}`;
                     div.style.left = zone.x + '%';
                     div.style.top = zone.y + '%';
                     div.style.width = zone.w + '%';
                     div.style.height = zone.h + '%';
+                    div.style.zIndex = 5 + idx; 
+                    
+                    let transformStr = '';
+                    if (zone.rotate) transformStr += `rotate(${zone.rotate}deg) `;
+                    if (zone.skewX) transformStr += `skewX(${zone.skewX}deg) `;
+                    div.style.transform = transformStr || '';
+
                     div.onmousedown = (e) => startMoving(e, idx);
-
-                    // Mise à jour du contenu interne
-                    if (!isInteracting) {
-                        // S'assurer que la règle @font-face est présente pour les polices personnalisées
-                        if (zone.fontFamily && zone.fontUrl) {
-                            const styleId = `font-${zone.fontFamily.replace(/[^a-z0-9]/gi, '-')}`;
-                            if (!document.getElementById(styleId)) {
-                                const style = document.createElement('style');
-                                style.id = styleId;
-                                style.textContent = `@font-face { font-family: "${zone.fontFamily}"; src: url("${zone.fontUrl}${PREVIEW_AUTH}"); }`;
-                                document.head.appendChild(style);
-                            }
-                        }
-
-                        if (zone.type === 'text') {
-                            div.innerHTML = `<div class="inner-content"></div>`;
-                            const inner = div.querySelector('.inner-content');
-                            inner.innerText = zone.text || '';
-                            inner.style.cssText = `width: 100%; height: 100%; display: flex; align-items: center; word-wrap: break-word; padding: 5%; box-sizing: border-box;`;
-                            inner.style.color = zone.color || 'white';
-                            inner.style.fontSize = (zone.fontSize || 24) + 'px';
-                            inner.style.textAlign = zone.textAlign || 'center';
-                            inner.style.justifyContent = zone.textAlign === 'justify' ? 'flex-start' : zone.textAlign;
-                            // Application propre de la police (le navigateur gère les guillemets automatiquement)
-                            inner.style.fontFamily = zone.fontFamily || 'sans-serif';
-                        }
-                        else if (zone.type === 'video' && zone.url) {
-                            if (!div.querySelector('video')) div.innerHTML = `<video src="${zone.url}${PREVIEW_AUTH}" muted loop autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
-                        }
-                        else if (zone.type === 'web' && zone.url) {
-                            if (!div.querySelector('iframe')) div.innerHTML = `<iframe src="${zone.url}${PREVIEW_AUTH}" style="width:100%;height:100%;border:none;pointer-events:none;background:white;"></iframe>`;
-                        }
-                        else if (zone.type === 'clock') {
-                            div.innerHTML = `<div class="clock-content"></div>`;
-                            const inner = div.querySelector('.clock-content');
-                            inner.style.cssText = `width:100%; height:100%; display:flex; align-items:center; justify-content:center;`;
-                            inner.style.color = zone.color || 'white';
-                            inner.style.fontSize = (zone.fontSize || 24) + 'px';
-                            inner.style.fontFamily = zone.fontFamily || 'sans-serif';
-                            inner.style.textAlign = zone.textAlign || 'center';
-                            inner.innerText = formatClock(new Date(), zone.clockFormat || 'HH:mm:ss');
-                        }
-                        else if (zone.url) {
-                            div.innerHTML = `<img src="${zone.url}${PREVIEW_AUTH}">`;
-                        }
+                    
+                    if (zone.type === 'text') div.innerHTML = `<div style="color:${zone.color || 'white'}; font-size:${zone.fontSize || 24}px; font-family:${zone.fontFamily || 'sans-serif'}; text-align:${zone.textAlign || 'center'}; width:100%; word-wrap: break-word;">${zone.text || ''}</div>`;
+                    else if (zone.type === 'video' && zone.url) div.innerHTML = `<video src="${zone.url}${PREVIEW_AUTH}" muted loop autoplay style="width:100%;height:100%;object-fit:contain;"></video>`;
+                    else if (zone.type === 'clock') {
+                        const clockDiv = document.createElement('div');
+                        clockDiv.style.cssText = `color:${zone.color || 'white'}; font-size:${zone.fontSize || 24}px; font-family:${zone.fontFamily || 'sans-serif'}; text-align:${zone.textAlign || 'center'}; width:100%; word-wrap: break-word;`;
+                        clockDiv.innerText = formatClock(new Date(), zone.clockFormat || 'HH:mm:ss');
+                        div.appendChild(clockDiv);
                     }
+                    else if (zone.type === 'web' && zone.url) {
+                        const zoom = zone.webZoom || 1.0;
+                        const panX = zone.webPanX || 0;
+                        const panY = zone.webPanY || 0;
+                        const iframeSrc = zone.url.startsWith('/') ? `${zone.url}${PREVIEW_AUTH}` : zone.url;
+                        div.innerHTML = `<div style="width:100%;height:100%;overflow:hidden;position:relative;">
+                            <iframe src="${iframeSrc}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;pointer-events:none;"></iframe>
+                        </div>`;
+                        
+                        div.onwheel = (e) => {
+                            if (selectedZoneIndex === idx) {
+                                e.preventDefault();
+                                saveStateForUndo();
+                                const delta = e.deltaY < 0 ? 0.05 : -0.05;
+                                let z = zone.webZoom || 1.0;
+                                z = Math.min(10.0, Math.max(0.1, z + delta));
+                                zone.webZoom = parseFloat(z.toFixed(2));
+                                
+                                document.getElementById('z-web-zoom').value = Math.round(zone.webZoom * 100);
+                                
+                                const iframe = div.querySelector('iframe');
+                                if (iframe) {
+                                    iframe.style.width = `${100 / zone.webZoom}%`;
+                                    iframe.style.height = `${100 / zone.webZoom}%`;
+                                    iframe.style.transform = `scale(${zone.webZoom}) translate(${zone.webPanX || 0}%, ${zone.webPanY || 0}%)`;
+                                }
+                            }
+                        };
+                    }
+                    else if (zone.type === 'qrcode') {
+                        const qrText = zone.text || 'https://pidyn.com';
+                        div.innerHTML = `<img src="/api/admin/qrcode?text=${encodeURIComponent(qrText)}&token=${token}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;">`;
+                    }
+                    else if (zone.url) div.innerHTML = `<img src="${zone.url}${PREVIEW_AUTH}">`;
                     
                     if (selectedZoneIndex === idx) {
-                        if (!div.querySelector('.resizer')) {
-                            const resizer = document.createElement('div');
-                            resizer.className = 'resizer';
-                            div.appendChild(resizer);
-                            resizer.onmousedown = (e) => startResizing(e);
-                        }
-                    } else {
-                        const r = div.querySelector('.resizer');
-                        if (r) r.remove();
+                        const resizer = document.createElement('div');
+                        resizer.className = 'resizer';
+                        resizer.onmousedown = (e) => startResizing(e);
+                        div.appendChild(resizer);
+
+                        const rotator = document.createElement('div');
+                        rotator.className = 'rotator-handle';
+                        rotator.onmousedown = (e) => startRotating(e, idx);
+                        div.appendChild(rotator);
                     }
-                    
-                    let label = div.querySelector('.zone-label');
-                    if (!label) {
-                        label = document.createElement('div');
-                        label.className = 'zone-label';
-                        div.appendChild(label);
-                    }
-                    label.innerText = `Zone ${idx+1} (${zone.type})`;
+                    const label = document.createElement('div');
+                    label.className = 'zone-label';
+                    label.innerText = `Calque ${idx+1} (${zone.type})`;
+                    div.appendChild(label);
+                    screen.appendChild(div);
                 });
             }
         }
-
+ 
         function handleMouseDown(e) {
             if (selectedIndex === -1) return;
+            const item = playlistData.items[selectedIndex];
+            if (item && item.template) return; // Désactiver le dessin de zones libres sur les modèles
+            if (e.target !== document.getElementById('preview-screen') && !e.target.classList.contains('bg-layer')) return;
             
-            // Empêche le drag natif du navigateur sur les images de fond
-            if (e.target.tagName === 'IMG') e.preventDefault();
-
-            // On ne commence à dessiner que si on clique sur le fond de l'écran
-            // (Le stopPropagation dans startMoving gère déjà les zones existantes)
-            if (e.target !== e.currentTarget && !e.target.classList.contains('bg-layer')) return;
-
+            saveStateForUndo();
             mode = 'drawing';
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-
             const rect = document.getElementById('preview-screen').getBoundingClientRect();
-            startX = ((e.clientX - rect.left) / rect.width) * 100;
-            startY = ((e.clientY - rect.top) / rect.height) * 100;
+            
+            const width = rect.width || 1;
+            const height = rect.height || 1;
 
+            startX = ((e.clientX - rect.left) / width) * 100;
+            startY = ((e.clientY - rect.top) / height) * 100;
+            
             currentDrawingZone = document.createElement('div');
-            currentDrawingZone.className = 'zone selected';
+            currentDrawingZone.className = 'zone';
             currentDrawingZone.style.left = applySnap(startX) + '%';
             currentDrawingZone.style.top = applySnap(startY) + '%';
             currentDrawingZone.style.width = '0%';
             currentDrawingZone.style.height = '0%';
-            currentDrawingZone.style.zIndex = '1000';
-            currentDrawingZone.style.pointerEvents = 'none'; // Empêche le drag de la zone en cours de dessin
+            
             document.getElementById('preview-screen').appendChild(currentDrawingZone);
         }
 
-        function handleMouseMove(e) {
+        let initialPanX = 0;
+        let initialPanY = 0;
+
+        function startMoving(e, idx) {
+            e.stopPropagation();
+            saveStateForUndo();
+            selectZone(idx);
+            const zone = playlistData.items[selectedIndex].zones[idx];
+            
+            if (zone.type === 'web' && e.shiftKey) {
+                mode = 'web-panning';
+                startX = e.clientX;
+                startY = e.clientY;
+                initialPanX = zone.webPanX || 0;
+                initialPanY = zone.webPanY || 0;
+                return;
+            }
+
+            mode = 'moving';
+            const rect = document.getElementById('preview-screen').getBoundingClientRect();
+            const width = rect.width || 1;
+            const height = rect.height || 1;
+            startX = ((e.clientX - rect.left) / width) * 100;
+            startY = ((e.clientY - rect.top) / height) * 100;
+            initialX = zone.x;
+            initialY = zone.y;
+        }
+
+        function startResizing(e) {
+            e.stopPropagation();
+            saveStateForUndo();
+            mode = 'resizing';
+            const rect = document.getElementById('preview-screen').getBoundingClientRect();
+            const width = rect.width || 1;
+            const height = rect.height || 1;
+            startX = ((e.clientX - rect.left) / width) * 100;
+            startY = ((e.clientY - rect.top) / height) * 100;
+            initialW = playlistData.items[selectedIndex].zones[selectedZoneIndex].w;
+            initialH = playlistData.items[selectedIndex].zones[selectedZoneIndex].h;
+        }
+
+        function startRotating(e, idx) {
+            e.stopPropagation();
+            saveStateForUndo();
+            selectZone(idx);
+            mode = 'rotating';
+            
+            const screen = document.getElementById('preview-screen');
+            const rect = screen.getBoundingClientRect();
+            const zone = playlistData.items[selectedIndex].zones[idx];
+            
+            const zoneW = (zone.w / 100) * rect.width;
+            const zoneH = (zone.h / 100) * rect.height;
+            const zoneLeft = rect.left + (zone.x / 100) * rect.width;
+            const zoneTop = rect.top + (zone.y / 100) * rect.height;
+            
+            rotationCenter = {
+                x: zoneLeft + zoneW / 2,
+                y: zoneTop + zoneH / 2
+            };
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (timelineMode !== 'none') {
+                const trackElement = document.querySelector('.track-timeline');
+                if (!trackElement) return;
+                
+                const totalWidth = trackElement.getBoundingClientRect().width || 1;
+                const deltaX = e.clientX - timelineStartX;
+
+                if (timelineMode === 'resizing-slide') {
+                    const totalDuration = playlistData.items.reduce((sum, item) => sum + (item.duration || 5000), 0);
+                    const msPerPixel = totalDuration / totalWidth;
+                    const deltaMs = deltaX * msPerPixel;
+                    const item = playlistData.items[activeSlideIdx];
+                    item.duration = Math.max(1000, initialBlockDuration + deltaMs);
+                    item.duration = Math.round(item.duration / 500) * 500;
+                    
+                    if (activeSlideIdx === selectedIndex) {
+                        document.getElementById('page-duration').value = item.duration;
+                    }
+                    renderTimeline();
+                }
+                else if (timelineMode === 'moving-layer') {
+                    const item = playlistData.items[selectedIndex];
+                    const totalDuration = playlistData.items.reduce((sum, item) => sum + (item.duration || 5000), 0);
+                    const msPerPixel = totalDuration / totalWidth;
+                    const deltaMs = deltaX * msPerPixel;
+                    const zone = item.zones[activeZoneIdx];
+                    const newStart = Math.max(0, initialBlockStart + deltaMs);
+                    zone.start = Math.round(newStart / 250) * 250;
+                    if (zone.start + zone.duration > item.duration) {
+                        item.duration = zone.start + zone.duration;
+                        document.getElementById('page-duration').value = item.duration;
+                    }
+                    if (selectedZoneIndex === activeZoneIdx) {
+                        document.getElementById('z-start').value = zone.start;
+                    }
+                    renderTimeline();
+                } 
+                else if (timelineMode === 'resizing-layer') {
+                    const item = playlistData.items[selectedIndex];
+                    const totalDuration = playlistData.items.reduce((sum, item) => sum + (item.duration || 5000), 0);
+                    const msPerPixel = totalDuration / totalWidth;
+                    const deltaMs = deltaX * msPerPixel;
+                    const zone = item.zones[activeZoneIdx];
+                    const newDuration = Math.max(500, initialBlockDuration + deltaMs);
+                    zone.duration = Math.round(newDuration / 250) * 250;
+                    if (zone.start + zone.duration > item.duration) {
+                        item.duration = zone.start + zone.duration;
+                        document.getElementById('page-duration').value = item.duration;
+                    }
+                    if (selectedZoneIndex === activeZoneIdx) {
+                        document.getElementById('z-duration').value = zone.duration;
+                    }
+                    renderTimeline();
+                }
+                return; 
+            }
+
             if (mode === 'none') return;
             const rect = document.getElementById('preview-screen').getBoundingClientRect();
-            let nowX = ((e.clientX - rect.left) / rect.width) * 100;
-            let nowY = ((e.clientY - rect.top) / rect.height) * 100;
+            const width = rect.width || 1;
+            const height = rect.height || 1;
+            
+            let nowX = ((e.clientX - rect.left) / width) * 100;
+            let nowY = ((e.clientY - rect.top) / height) * 100;
 
-            if (mode === 'drawing') {
+            if (mode === 'drawing' && currentDrawingZone) {
                 const sX = applySnap(startX);
                 const sY = applySnap(startY);
                 const nX = applySnap(nowX);
@@ -692,105 +1997,97 @@
                 currentDrawingZone.style.top = Math.min(sY, nY) + '%';
                 currentDrawingZone.style.width = Math.abs(nX - sX) + '%';
                 currentDrawingZone.style.height = Math.abs(nY - sY) + '%';
-            } else if (mode === 'moving') {
+            } else if (mode === 'moving' && selectedZoneIndex !== -1) {
                 const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
-                zone.x = applySnap(nowX - offsetX);
-                zone.y = applySnap(nowY - offsetY);
-                
-                // Contraintes de bordures (0-100%)
-                if (zone.x < 0) zone.x = 0;
-                if (zone.y < 0) zone.y = 0;
-                if (zone.x + zone.w > 100) zone.x = 100 - zone.w;
-                if (zone.y + zone.h > 100) zone.y = 100 - zone.h;
-                
-                // Pas de saveStateForUndo ici, car c'est un mouvement continu
+                zone.x = applySnap(initialX + (nowX - startX));
+                zone.y = applySnap(initialY + (nowY - startY));
                 renderPreview();
-            } else if (mode === 'resizing') {
+            } else if (mode === 'web-panning' && selectedZoneIndex !== -1) {
                 const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
-                zone.w = Math.max(GRID_SIZE, applySnap(initialW + (nowX - startX)));
-                zone.h = Math.max(GRID_SIZE, applySnap(initialH + (nowY - startY)));
-                
-                // Empêcher de sortir par la droite ou le bas
-                if (zone.x + zone.w > 100) zone.w = 100 - zone.x;
-                if (zone.y + zone.h > 100) zone.h = 100 - zone.y;
-                // Pas de saveStateForUndo ici, car c'est un redimensionnement continu
-
+                const zoom = zone.webZoom || 1.0;
+                const zoneDiv = document.querySelector('.zone.selected');
+                if (zoneDiv) {
+                    const zoneRect = zoneDiv.getBoundingClientRect();
+                    const zoneW = zoneRect.width || 1;
+                    const zoneH = zoneRect.height || 1;
+                    
+                    const deltaXPercent = ((e.clientX - startX) / zoneW) * 100;
+                    const deltaYPercent = ((e.clientY - startY) / zoneH) * 100;
+                    
+                    zone.webPanX = parseFloat((initialPanX + deltaXPercent).toFixed(2));
+                    zone.webPanY = parseFloat((initialPanY + deltaYPercent).toFixed(2));
+                    
+                    document.getElementById('z-web-panx').value = Math.round(zone.webPanX);
+                    document.getElementById('z-web-pany').value = Math.round(zone.webPanY);
+                    
+                    const iframe = zoneDiv.querySelector('iframe');
+                    if (iframe) {
+                        iframe.style.transform = `scale(${zoom}) translate(${zone.webPanX}%, ${zone.webPanY}%)`;
+                    }
+                }
+            } else if (mode === 'resizing' && selectedZoneIndex !== -1) {
+                const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
+                zone.w = applySnap(initialW + (nowX - startX));
+                zone.h = applySnap(initialH + (nowY - startY));
+                renderPreview();
+            } else if (mode === 'rotating' && selectedZoneIndex !== -1 && rotationCenter) {
+                const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
+                const deltaX = e.clientX - rotationCenter.x;
+                const deltaY = e.clientY - rotationCenter.y;
+                let angleRad = Math.atan2(deltaY, deltaX);
+                let angleDeg = angleRad * (180 / Math.PI) + 90;
+                angleDeg = Math.round(angleDeg);
+                if (angleDeg < 0) angleDeg += 360;
+                angleDeg = angleDeg % 360;
+                if (e.shiftKey) {
+                    angleDeg = Math.round(angleDeg / 15) * 15;
+                }
+                zone.rotate = angleDeg;
+                document.getElementById('z-rotate').value = zone.rotate;
                 renderPreview();
             }
-        }
+        });
 
-        function handleMouseUp() {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
+        document.addEventListener('mouseup', () => {
+            if (timelineMode !== 'none') {
+                timelineMode = 'none';
+                renderPreview();
+                return;
+            }
 
             if (mode === 'drawing' && currentDrawingZone) {
-                const rect = {
-                    l: parseFloat(currentDrawingZone.style.left),
-                    t: parseFloat(currentDrawingZone.style.top),
-                    w: parseFloat(currentDrawingZone.style.width),
-                    h: parseFloat(currentDrawingZone.style.height)
-                };
-                currentDrawingZone.remove();
-
                 const zone = {
-                    x: rect.l, y: rect.t, w: rect.w, h: rect.h,
-                    type: 'text', url: '', text: 'Nouveau Texte' // Default to text for new zones
+                    x: parseFloat(currentDrawingZone.style.left),
+                    y: parseFloat(currentDrawingZone.style.top),
+                    w: parseFloat(currentDrawingZone.style.width),
+                    h: parseFloat(currentDrawingZone.style.height),
+                    type: 'text', url: '', text: 'Nouveau Texte',
+                    start: 0, duration: playlistData.items[selectedIndex].duration || 5000
                 };
-                if (zone.w >= GRID_SIZE && zone.h >= GRID_SIZE) {
-                    saveStateForUndo(); // Sauvegarder l'état AVANT la modification
+                if (zone.w > 1 && zone.h > 1) { 
                     playlistData.items[selectedIndex].zones = playlistData.items[selectedIndex].zones || [];
-                    // Initialiser les propriétés de texte par défaut si c'est une zone de texte
-                    if (zone.type === 'text') initializeNewTextZone(zone);
-                    // Si c'est une horloge, initialiser les propriétés par défaut
-                    if (zone.type === 'clock') initializeNewClockZone(zone);
+                    initializeNewTextZone(zone);
                     playlistData.items[selectedIndex].zones.push(zone);
                     selectZone(playlistData.items[selectedIndex].zones.length - 1);
+                } else {
+                    currentDrawingZone.remove();
                 }
             }
             mode = 'none';
             currentDrawingZone = null;
-        }
-
-        function startMoving(e, idx) {
-            // Si on clique sur le resizer, ce n'est pas un déplacement
-            if (e.target.classList.contains('resizer')) {
-                return;
-            }
-            e.stopPropagation();
-            saveStateForUndo(); // Sauvegarder l'état AVANT le mouvement
-            selectZone(idx);
-            mode = 'moving';
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-            const rect = document.getElementById('preview-screen').getBoundingClientRect();
-            startX = ((e.clientX - rect.left) / rect.width) * 100;
-            startY = ((e.clientY - rect.top) / rect.height) * 100;
-            initialX = playlistData.items[selectedIndex].zones[idx].x;
-            initialY = playlistData.items[selectedIndex].zones[idx].y;
-            offsetX = startX - initialX;
-            offsetY = startY - initialY;
-        }
-
-        function startResizing(e) {
-            e.stopPropagation();
-            mode = 'resizing';
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-            const rect = document.getElementById('preview-screen').getBoundingClientRect();
-            startX = ((e.clientX - rect.left) / rect.width) * 100;
-            startY = ((e.clientY - rect.top) / rect.height) * 100;
-            initialW = playlistData.items[selectedIndex].zones[selectedZoneIndex].w;
-            initialH = playlistData.items[selectedIndex].zones[selectedZoneIndex].h;
-            saveStateForUndo(); // Sauvegarder l'état avant de commencer le redimensionnement
-        }
+            rotationCenter = null;
+        });
 
         function selectZone(idx) {
             selectedZoneIndex = idx;
             const zone = playlistData.items[selectedIndex].zones[idx];
             document.getElementById('zone-editor').style.display = 'block';
+            document.getElementById('no-zone-message').style.display = 'none';
+            switchSidebarTab('zone');
             document.getElementById('z-type').value = zone.type;
-            // On met à jour la liste des médias selon le type actuel de la zone
-            populateMediaSelectsForZone(zone.type)
+            // Re-peupler la liste des médias spécifiquement pour le type de cette zone
+            populateMediaSelectsForZone(zone.type);
+            
             document.getElementById('z-url').value = zone.url || '';
             document.getElementById('z-text').value = zone.text || '';
             document.getElementById('z-font-family').value = zone.fontFamily || 'Arial, sans-serif';
@@ -798,96 +2095,146 @@
             document.getElementById('z-color').value = zone.color || '#ffffff';
             document.getElementById('z-text-align').value = zone.textAlign || 'center';
             document.getElementById('z-clock-format').value = zone.clockFormat || 'HH:mm:ss';
-            document.getElementById('z-anim-in').value = zone.animationIn || 'none';
-            document.getElementById('z-anim-in-dur').value = zone.animationInDuration || 1000;
-            document.getElementById('z-anim-out').value = zone.animationOut || 'none';
-            document.getElementById('z-anim-out-dur').value = zone.animationOutDuration || 800;
-            document.getElementById('z-marquee').checked = !!zone.isMarquee;
+            
+            document.getElementById('z-start').value = zone.start !== undefined ? zone.start : 0;
+            document.getElementById('z-duration').value = zone.duration !== undefined ? zone.duration : (playlistData.items[selectedIndex].duration || 5000);
+            document.getElementById('z-rotate').value = zone.rotate !== undefined ? zone.rotate : 0;
+            document.getElementById('z-skewx').value = zone.skewX !== undefined ? zone.skewX : 0;
 
-            // Afficher le bon champ (Media ou Texte) selon le type
+            document.getElementById('z-anim-in').value = zone.animationIn || 'none';
+            document.getElementById('z-anim-in-dur').value = zone.animationInDuration !== undefined ? zone.animationInDuration : 1000;
+            document.getElementById('z-anim-out').value = zone.animationOut || 'none';
+            document.getElementById('z-anim-out-dur').value = zone.animationOutDuration !== undefined ? zone.animationOutDuration : 800;
+
+            // Propriétés Web et Iframe
+            document.getElementById('z-web-url').value = (zone.type === 'web' && zone.url) ? zone.url : '';
+            document.getElementById('z-web-zoom').value = zone.webZoom !== undefined ? Math.round(zone.webZoom * 100) : 100;
+            document.getElementById('z-web-panx').value = zone.webPanX || 0;
+            document.getElementById('z-web-pany').value = zone.webPanY || 0;
+
             const isText = zone.type === 'text';
             const isClock = zone.type === 'clock';
-            const isMedia = ['image', 'video', 'web'].includes(zone.type);
-
-            document.getElementById('z-url').style.display = isMedia ? 'block' : 'none';
-            document.getElementById('z-text').style.display = isText ? 'block' : 'none';
+            const isWeb = zone.type === 'web';
+            const isQr = zone.type === 'qrcode';
+            
+            document.getElementById('z-url').style.display = (isText || isWeb || isQr) ? 'none' : 'block';
+            document.getElementById('z-web-url').style.display = isWeb ? 'block' : 'none';
+            document.getElementById('z-text').style.display = (isText || isQr) ? 'block' : 'none';
+            document.getElementById('web-properties').style.display = isWeb ? 'block' : 'none';
             document.querySelector('.text-properties').style.display = (isText || isClock) ? 'block' : 'none';
-            document.getElementById('z-clock-group').style.display = isClock ? 'block' : 'none';
-            document.getElementById('z-marquee').parentElement.style.display = isText ? 'flex' : 'none';
+
+            const contentLabel = document.getElementById('z-content-label');
+            const textInput = document.getElementById('z-text');
+            if (isQr) {
+                contentLabel.innerText = "Lien / Texte du Code QR";
+                textInput.placeholder = "Lien ou texte à encoder (https://...)";
+            } else if (isText) {
+                contentLabel.innerText = "Texte";
+                textInput.placeholder = "Votre texte ici...";
+            } else if (isWeb) {
+                contentLabel.innerText = "Adresse Web / Chemin local";
+            } else {
+                contentLabel.innerText = "Média";
+            }
             
             renderPreview();
+            renderTimeline();
         }
 
         function updateZone() {
             if (selectedZoneIndex === -1) return;
+            saveStateForUndo();
             const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
             const oldType = zone.type;
             const newType = document.getElementById('z-type').value;
-
-            // Si le type a changé, on rafraîchit la liste des fichiers filtrés
+            
             if (oldType !== newType) {
-                populateMediaSelectsForZone(newType);
                 zone.type = newType;
+                populateMediaSelectsForZone(newType);
+                zone.url = '';
+                document.getElementById('z-url').value = '';
+                document.getElementById('z-web-url').value = '';
+                document.getElementById('z-text').value = newType === 'text' ? 'Nouveau Texte' : '';
             }
-
-            zone.url = document.getElementById('z-url').value;
-            zone.text = document.getElementById('z-text').value;
-
-            // Switch d'affichage dynamique
-            const isText = zone.type === 'text';
-            const isClock = zone.type === 'clock';
-            const isMedia = ['image', 'video', 'web'].includes(zone.type);
-
-            document.getElementById('z-url').style.display = isMedia ? 'block' : 'none';
-            document.getElementById('z-text').style.display = isText ? 'block' : 'none';
-            document.querySelector('.text-properties').style.display = (isText || isClock) ? 'block' : 'none';
-            document.getElementById('z-clock-group').style.display = isClock ? 'block' : 'none';
-            document.getElementById('z-marquee').parentElement.style.display = isText ? 'flex' : 'none';
+            
+            if (newType === 'web') {
+                zone.url = document.getElementById('z-web-url').value;
+                zone.webZoom = parseFloat(document.getElementById('z-web-zoom').value) / 100 || 1.0;
+                zone.webPanX = parseInt(document.getElementById('z-web-panx').value) || 0;
+                zone.webPanY = parseInt(document.getElementById('z-web-pany').value) || 0;
+            } else if (newType === 'qrcode') {
+                zone.text = document.getElementById('z-text').value || 'https://pidyn.com';
+                zone.url = "/api/admin/qrcode?text=" + encodeURIComponent(zone.text);
+            } else {
+                zone.url = document.getElementById('z-url').value;
+                delete zone.webZoom;
+                delete zone.webPanX;
+                delete zone.webPanY;
+            }
+            
+            if (newType !== 'qrcode') {
+                zone.text = document.getElementById('z-text').value;
+            }
+            
+            zone.start = parseInt(document.getElementById('z-start').value) || 0;
+            zone.duration = parseInt(document.getElementById('z-duration').value) || (playlistData.items[selectedIndex].duration || 5000);
+            zone.rotate = parseInt(document.getElementById('z-rotate').value) || 0;
+            zone.skewX = parseInt(document.getElementById('z-skewx').value) || 0;
 
             zone.animationIn = document.getElementById('z-anim-in').value;
             zone.animationInDuration = parseInt(document.getElementById('z-anim-in-dur').value) || 1000;
             zone.animationOut = document.getElementById('z-anim-out').value;
             zone.animationOutDuration = parseInt(document.getElementById('z-anim-out-dur').value) || 800;
-            zone.isMarquee = document.getElementById('z-marquee').checked;
 
-            // Mettre à jour les propriétés de texte si le type est "text"
-            if (zone.type === 'text') {
-                const fontOpt = document.getElementById('z-font-family').selectedOptions[0];
-                zone.fontFamily = fontOpt.value;
-                zone.fontUrl = fontOpt.dataset.url || null;
+            const item = playlistData.items[selectedIndex];
+            if (zone.start + zone.duration > item.duration) {
+                item.duration = zone.start + zone.duration;
+                document.getElementById('page-duration').value = item.duration;
+            }
+
+            const isText = zone.type === 'text';
+            const isClock = zone.type === 'clock';
+            const isWeb = zone.type === 'web';
+            const isQr = zone.type === 'qrcode';
+            
+            document.getElementById('z-url').style.display = (isText || isWeb || isQr) ? 'none' : 'block';
+            document.getElementById('z-web-url').style.display = isWeb ? 'block' : 'none';
+            document.getElementById('z-text').style.display = (isText || isQr) ? 'block' : 'none';
+            document.getElementById('web-properties').style.display = isWeb ? 'block' : 'none';
+            document.querySelector('.text-properties').style.display = (isText || isClock) ? 'block' : 'none';
+
+            const contentLabel = document.getElementById('z-content-label');
+            const textInput = document.getElementById('z-text');
+            if (isQr) {
+                contentLabel.innerText = "Lien / Texte du Code QR";
+                textInput.placeholder = "Lien ou texte à encoder (https://...)";
+            } else if (isText) {
+                contentLabel.innerText = "Texte";
+                textInput.placeholder = "Votre texte ici...";
+            } else if (isWeb) {
+                contentLabel.innerText = "Adresse Web / Chemin local";
+            } else {
+                contentLabel.innerText = "Média";
+            }
+
+            if (zone.type === 'text' || zone.type === 'clock') {
+                zone.fontFamily = document.getElementById('z-font-family').value;
                 zone.fontSize = parseInt(document.getElementById('z-font-size').value);
                 zone.color = document.getElementById('z-color').value;
                 zone.textAlign = document.getElementById('z-text-align').value;
-            } else if (oldType === 'text' && zone.type !== 'clock') { // Nettoyer si on quitte le texte pour autre chose que l'horloge
-                // Si on passe d'un type texte à un autre, nettoyer les propriétés de texte
-                delete zone.fontFamily;
-                delete zone.fontUrl;
-                delete zone.fontSize;
-                delete zone.color;
-                delete zone.textAlign;
-            } else if (zone.type === 'clock') {
-                const fontOpt = document.getElementById('z-font-family').selectedOptions[0];
-                zone.fontFamily = fontOpt.value;
-                zone.fontUrl = fontOpt.dataset.url || null;
-                zone.fontSize = parseInt(document.getElementById('z-font-size').value);
-                zone.color = document.getElementById('z-color').value;
-                zone.textAlign = document.getElementById('z-text-align').value;
-                zone.clockFormat = document.getElementById('z-clock-format').value;
-            } else if (oldType === 'clock' && zone.type !== 'text') { // Nettoyer si on quitte l'horloge pour autre chose que le texte
-                // Si on passe d'un type texte à un autre, nettoyer les propriétés de texte
-                delete zone.fontFamily;
-                delete zone.fontSize;
-                delete zone.color;
-                delete zone.textAlign;
+                if (zone.type === 'clock') zone.clockFormat = document.getElementById('z-clock-format').value;
+            } else {
+                delete zone.fontFamily; delete zone.fontSize; delete zone.color; delete zone.textAlign; delete zone.clockFormat;
             }
             
             renderPreview();
+            renderTimeline();
         }
-
 
         function updatePageDuration() {
             if (selectedIndex === -1) return;
-            playlistData.items[selectedIndex].duration = parseInt(document.getElementById('page-duration').value) || 0;
+            saveStateForUndo();
+            playlistData.items[selectedIndex].duration = parseInt(document.getElementById('page-duration').value) || 5000;
             renderTimeline();
         }
 
@@ -898,42 +2245,57 @@
             renderPreview();
         }
 
+        function updatePageBgUrl() {
+            if (selectedIndex === -1) return;
+            saveStateForUndo();
+            playlistData.items[selectedIndex].backgroundUrl = document.getElementById('page-bg-url').value;
+            renderPreview();
+        }
+
         function moveZoneForward() { moveZone(1); }
         function moveZoneBackward() { moveZone(-1); }
 
         function moveZone(delta) {
             if (selectedIndex === -1 || selectedZoneIndex === -1) return;
-            saveStateForUndo();
             const zones = playlistData.items[selectedIndex].zones;
             const newIndex = selectedZoneIndex + delta;
             if (newIndex >= 0 && newIndex < zones.length) {
+                saveStateForUndo();
                 [zones[selectedZoneIndex], zones[newIndex]] = [zones[newIndex], zones[selectedZoneIndex]];
                 selectedZoneIndex = newIndex;
                 renderPreview();
+                renderTimeline();
+            }
+        }
+
+        function moveZoneForIndex(idx, delta) {
+            if (selectedIndex === -1) return;
+            const zones = playlistData.items[selectedIndex].zones;
+            const newIndex = idx + delta;
+            if (newIndex >= 0 && newIndex < zones.length) {
+                saveStateForUndo();
+                const temp = zones[idx];
+                zones[idx] = zones[newIndex];
+                zones[newIndex] = temp;
+                
+                if (selectedZoneIndex === idx) {
+                    selectedZoneIndex = newIndex;
+                } else if (selectedZoneIndex === newIndex) {
+                    selectedZoneIndex = idx;
+                }
+                
+                renderTimeline();
+                renderPreview();
+                if (selectedZoneIndex !== -1) {
+                    selectZone(selectedZoneIndex);
+                }
             }
         }
 
         function addNewItem() {
             saveStateForUndo();
-            playlistData.items.push({ 
-                duration: 5000, 
-                zones: [] 
-            });
-            selectItem(playlistData.items.length - 1);
-        }
-
-        function addTemplate(type) {
-            saveStateForUndo();
-            const defaults = {
-                canteen: { title: 'Menu du Jour', starter: 'Salade', main: 'Plat', dessert: 'Fruits', useLiveMenu: false },
-                meeting: { room: 'Salle A', subject: 'Libre', status: 'Disponible' }
-            };
-            playlistData.items.push({ 
-                duration: 10000, 
-                template: type,
-                data: defaults[type],
-                zones: [] 
-            });
+            playlistData.items = playlistData.items || [];
+            playlistData.items.push({ duration: 5000, backgroundColor: '#000000', zones: [] });
             selectItem(playlistData.items.length - 1);
         }
 
@@ -942,74 +2304,43 @@
         }
 
         function deleteCurrentItemByIndex(index) {
-            if (!confirm('Voulez-vous vraiment supprimer cette vignette ?')) return;
+            if (!confirm('Voulez-vous vraiment supprimer cette page ?')) return;
             saveStateForUndo();
             playlistData.items.splice(index, 1);
             if (selectedIndex === index) {
-                selectedIndex = -1;
+                selectedIndex = playlistData.items.length > 0 ? 0 : -1;
                 selectedZoneIndex = -1;
-                document.getElementById('page-editor').style.display = 'none';
-                document.getElementById('zone-editor').style.display = 'none';
             } else if (selectedIndex > index) {
                 selectedIndex--;
             }
-            renderTimeline();
-            renderPreview();
+            selectItem(selectedIndex);
         }
 
         function duplicateItemByIndex(index) {
             saveStateForUndo();
             const originalItem = playlistData.items[index];
-            const newItem = JSON.parse(JSON.stringify(originalItem)); // Clone profond (zones incluses)
+            const newItem = JSON.parse(JSON.stringify(originalItem)); 
             playlistData.items.splice(index + 1, 0, newItem);
-            selectItem(index + 1); // Sélectionne la nouvelle vignette
-        }
-
-        // Initialisation des propriétés de texte par défaut pour une nouvelle zone
-        function initializeNewTextZone(zone) {
-            zone.fontFamily = 'Arial, sans-serif';
-            zone.fontUrl = null; // Pas de police personnalisée par défaut
-            zone.fontSize = 24;
-            zone.color = '#ffffff';
-            zone.textAlign = 'center';
-            zone.isMarquee = false;
-        }
-
-        // Initialisation des propriétés d'horloge par défaut pour une nouvelle zone
-        function initializeNewClockZone(zone) {
-            zone.fontFamily = 'Arial, sans-serif';
-            zone.fontUrl = null; // Pas de police personnalisée par défaut
-            zone.fontSize = 24;
-            zone.color = '#ffffff';
-            zone.textAlign = 'center';
-            zone.clockFormat = 'HH:mm:ss'; // Format par défaut
+            selectItem(index + 1); 
         }
 
         function saveStateForUndo() {
+            const currentStateStr = JSON.stringify(playlistData);
+            if (undoStack.length > 0 && undoStack[undoStack.length - 1] === currentStateStr) {
+                return; // Prevent saving duplicate identical states
+            }
             redoStack = []; // Clear redo stack on new action
-            undoStack.push(JSON.parse(JSON.stringify(playlistData)));
+            undoStack.push(currentStateStr);
             if (undoStack.length > MAX_UNDO_STATES) {
                 undoStack.shift(); // Remove the oldest state
             }
-            // console.log("State saved. Undo stack size:", undoStack.length);
-        }
-
-
-        function deleteZone() {
-            if (selectedZoneIndex === -1) return;
-            saveStateForUndo();
-            playlistData.items[selectedIndex].zones.splice(selectedZoneIndex, 1);
-            selectedZoneIndex = -1;
-            document.getElementById('zone-editor').style.display = 'none';
-            renderPreview();
         }
 
         function undo() {
-            if (undoStack.length > 1) { // Garder au moins un état (l'état initial)
-                redoStack.push(JSON.parse(JSON.stringify(playlistData)));
-                playlistData = undoStack.pop();
+            if (undoStack.length > 0) {
+                redoStack.push(JSON.stringify(playlistData));
+                playlistData = JSON.parse(undoStack.pop());
 
-                // Ajuster selectedIndex et selectedZoneIndex après undo
                 if (selectedIndex !== -1 && selectedIndex >= playlistData.items.length) {
                     selectedIndex = playlistData.items.length > 0 ? playlistData.items.length - 1 : -1;
                 }
@@ -1019,20 +2350,27 @@
                 if (selectedIndex === -1) {
                     document.getElementById('page-editor').style.display = 'none';
                     document.getElementById('zone-editor').style.display = 'none';
+                    document.getElementById('no-page-message').style.display = 'block';
+                    document.getElementById('no-zone-message').style.display = 'block';
                 } else if (selectedZoneIndex === -1) {
                     document.getElementById('zone-editor').style.display = 'none';
+                    document.getElementById('no-zone-message').style.display = 'block';
+                    selectItem(selectedIndex);
                 } else {
-                    selectZone(selectedZoneIndex); // Re-populate zone editor if a zone is still selected
+                    selectZone(selectedZoneIndex);
                 }
                 renderTimeline();
                 renderPreview();
+                showToast("Action annulée", "info");
+            } else {
+                showToast("Rien à annuler", "warning");
             }
         }
 
         function redo() {
             if (redoStack.length > 0) {
-                undoStack.push(JSON.parse(JSON.stringify(playlistData)));
-                playlistData = redoStack.pop();
+                undoStack.push(JSON.stringify(playlistData));
+                playlistData = JSON.parse(redoStack.pop());
 
                 if (selectedIndex !== -1 && selectedIndex >= playlistData.items.length) {
                     selectedIndex = playlistData.items.length > 0 ? playlistData.items.length - 1 : -1;
@@ -1040,102 +2378,473 @@
                 if (selectedIndex !== -1 && selectedZoneIndex !== -1 && selectedIndex < playlistData.items.length && selectedZoneIndex >= playlistData.items[selectedIndex].zones.length) {
                     selectedZoneIndex = playlistData.items[selectedIndex].zones.length > 0 ? playlistData.items[selectedIndex].zones.length - 1 : -1;
                 }
+                if (selectedIndex === -1) {
+                    document.getElementById('page-editor').style.display = 'none';
+                    document.getElementById('zone-editor').style.display = 'none';
+                    document.getElementById('no-page-message').style.display = 'block';
+                    document.getElementById('no-zone-message').style.display = 'block';
+                } else if (selectedZoneIndex === -1) {
+                    document.getElementById('zone-editor').style.display = 'none';
+                    document.getElementById('no-zone-message').style.display = 'block';
+                    selectItem(selectedIndex);
+                } else {
+                    selectZone(selectedZoneIndex);
+                }
                 renderTimeline();
                 renderPreview();
+                showToast("Action rétablie", "info");
+            } else {
+                showToast("Rien à rétablir", "warning");
             }
         }
 
-        function previewPlaylist() {
-            if (!playlistId) return alert("Veuillez d'abord enregistrer le diaporama.");
-            const url = `/player?id=${playlistId}&apiKey=ma_cle_secrete_123`;
-            window.open(url, '_blank');
+        function deleteZone() {
+            if (selectedZoneIndex !== -1) deleteZoneByIndex(selectedZoneIndex);
+        }
+
+        function deleteZoneByIndex(idx) {
+            if (!confirm('Supprimer ce calque ?')) return;
+            saveStateForUndo();
+            playlistData.items[selectedIndex].zones.splice(idx, 1);
+            selectedZoneIndex = -1;
+            document.getElementById('zone-editor').style.display = 'none';
+            document.getElementById('no-zone-message').style.display = 'block';
+            renderTimeline();
+            renderPreview();
+        }
+
+        function initializeNewTextZone(zone) {
+            zone.fontFamily = 'Arial, sans-serif';
+            zone.fontSize = 24;
+            zone.color = '#ffffff';
+            zone.textAlign = 'center';
+            zone.clockFormat = 'HH:mm:ss';
         }
 
         async function savePlaylist() {
             const name = document.getElementById('pl-name').value;
-            if (!name) return alert("Veuillez donner un nom au diaporama");
+            if (!name) return showToast("Veuillez donner un nom au diaporama.", "error");
 
             const isNewPlaylist = !playlistId;
 
-            const res = await fetch('/api/admin/playlists', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ 
-                    id: playlistId, // Garde le même ID si on modifie
-                    name: name, 
-                    items: playlistData.items,
-                    backgroundUrl: playlistData.backgroundUrl,
-                    backgroundColor: playlistData.backgroundColor,
-                    resolution: playlistData.resolution
-                })
-            });
-            if (res.ok) {
-                const result = await res.json();
-                alert('Enregistré !');
-                if (isNewPlaylist) {
-                    window.history.replaceState({}, '', `/editor?id=${result.playlistId}`);
-                    playlistId = result.playlistId;
+            try {
+                 const res = await fetch('/api/admin/playlists', {
+                     method: 'POST',
+                     headers: { 
+                         'Content-Type': 'application/json', 
+                         'Authorization': `Bearer ${token}` 
+                     },
+                     body: JSON.stringify({ 
+                        id: playlistId, 
+                        name: name, 
+                        items: playlistData.items,
+                        backgroundUrl: playlistData.backgroundUrl,
+                        backgroundColor: playlistData.backgroundColor,
+                        resolution: playlistData.resolution
+                    })
+                });
+                if (res.ok) {
+                    const result = await res.json();
+                    showToast('Enregistrement effectué avec succès !');
+                    if (isNewPlaylist) {
+                        window.history.replaceState({}, '', `/editor?id=${result.playlistId}`);
+                        playlistId = result.playlistId;
+                    }
+                    const role = localStorage.getItem('pidyn_role');
+                    playlistData.status = (role === 'admin' || role === 'editor') ? 'approved' : 'draft';
+                    updateStatusAndButtons();
+                    renderTimeline(); 
+                } else {
+                    showToast('Erreur lors de l\'enregistrement.', 'error');
                 }
-                renderTimeline(); // Rafraîchir l'affichage pour s'assurer que tout est à jour
-            } else {
-                alert('Erreur lors de l\'enregistrement.');
-                const errorText = await res.text();
-                alert('Erreur lors de l\'enregistrement : ' + errorText);
+            } catch (err) {
+                showToast('Erreur de connexion avec le serveur.', 'error');
+                console.error(err);
             }
         }
 
+        function updateStatusAndButtons() {
+            const role = localStorage.getItem('pidyn_role');
+            const status = playlistData.status || 'approved';
+
+            let badge = document.getElementById('playlist-status-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.id = 'playlist-status-badge';
+                badge.style.marginLeft = '10px';
+                badge.style.padding = '3px 8px';
+                badge.style.borderRadius = '4px';
+                badge.style.fontSize = '12px';
+                badge.style.fontWeight = 'bold';
+                badge.style.whiteSpace = 'nowrap';
+                const plNameInput = document.getElementById('pl-name');
+                if (plNameInput) plNameInput.parentNode.insertBefore(badge, plNameInput.nextSibling);
+            }
+
+            if (status === 'draft') {
+                badge.innerText = 'Brouillon';
+                badge.style.background = '#7f8c8d';
+                badge.style.color = 'white';
+            } else if (status === 'pending') {
+                badge.innerText = 'En attente de validation';
+                badge.style.background = '#e67e22';
+                badge.style.color = 'white';
+            } else {
+                badge.innerText = 'Validé';
+                badge.style.background = '#2ecc71';
+                badge.style.color = 'white';
+            }
+
+            const btnApprove = document.getElementById('btn-approve-playlist');
+            const btnSubmit = document.getElementById('btn-submit-playlist');
+            const btnPublish = document.getElementById('btn-publish-playlist');
+
+            if (btnApprove) btnApprove.style.display = 'none';
+            if (btnSubmit) btnSubmit.style.display = 'none';
+            if (btnPublish) btnPublish.style.display = 'none';
+
+            if (!playlistId) return;
+
+            const isValidator = role === 'admin' || role === 'editor';
+
+            if (isValidator) {
+                if (btnPublish) btnPublish.style.display = 'inline-flex';
+                if (status !== 'approved' && btnApprove) {
+                    btnApprove.style.display = 'inline-flex';
+                }
+            } else if (role === 'author') {
+                if (status === 'draft' && btnSubmit) {
+                    btnSubmit.style.display = 'inline-flex';
+                }
+            }
+        }
+
+        async function approveCurrentPlaylist() {
+            if (!playlistId) return;
+            try {
+                const res = await fetch(`/api/admin/playlists/${playlistId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    showToast('Diaporama validé avec succès !');
+                    playlistData.status = 'approved';
+                    updateStatusAndButtons();
+                } else {
+                    showToast('Erreur lors de la validation.', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Erreur de connexion.', 'error');
+            }
+        }
+
+        async function submitCurrentPlaylist() {
+            if (!playlistId) return;
+            const name = document.getElementById('pl-name').value;
+            if (!name) return showToast("Veuillez donner un nom au diaporama.", "error");
+
+            try {
+                const res = await fetch('/api/admin/playlists', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'Authorization': `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({ 
+                        id: playlistId, 
+                        name: name, 
+                        items: playlistData.items,
+                        backgroundUrl: playlistData.backgroundUrl,
+                        backgroundColor: playlistData.backgroundColor,
+                        resolution: playlistData.resolution,
+                        status: 'pending'
+                    })
+                });
+                if (res.ok) {
+                    showToast('Diaporama soumis pour validation !');
+                    playlistData.status = 'pending';
+                    updateStatusAndButtons();
+                } else {
+                    showToast('Erreur lors de la soumission.', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Erreur de connexion.', 'error');
+            }
+        }
+
+        async function openPublishModal() {
+            if (!playlistId) {
+                alert("Veuillez d'abord enregistrer le diaporama avant de le publier.");
+                return;
+            }
+            
+            const groupList = document.getElementById('publish-groups-list');
+            const playerList = document.getElementById('publish-players-list');
+            
+            groupList.innerHTML = '<div style="color:#bdc3c7;font-size:12px;padding:5px;">Chargement...</div>';
+            playerList.innerHTML = '<div style="color:#bdc3c7;font-size:12px;padding:5px;">Chargement...</div>';
+            
+            document.getElementById('publish-modal').style.display = 'flex';
+            
+            try {
+                const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+                const data = await res.json();
+                
+                const players = data.players || {};
+                const groups = data.groups || [];
+                
+                // Remplir les groupes
+                groupList.innerHTML = '';
+                if (groups.length === 0) {
+                    groupList.innerHTML = '<div style="color:#bdc3c7;font-size:11px;padding:5px;">Aucun groupe configuré</div>';
+                } else {
+                    groups.forEach(g => {
+                        const div = document.createElement('div');
+                        div.style.display = 'flex';
+                        div.style.alignItems = 'center';
+                        div.style.gap = '8px';
+                        div.innerHTML = `
+                            <input type="checkbox" class="publish-group-check" value="${g.id}" id="pub-grp-${g.id}" style="width:auto;margin:0;">
+                            <label for="pub-grp-${g.id}" style="color:white;font-size:12px;cursor:pointer;font-weight:bold;">📁 ${g.name}</label>
+                        `;
+                        groupList.appendChild(div);
+                    });
+                }
+                
+                // Remplir les players approuvés
+                playerList.innerHTML = '';
+                const playerIds = Object.keys(players);
+                const approvedPlayers = playerIds.filter(pid => players[pid].status === 'approved');
+                
+                if (approvedPlayers.length === 0) {
+                    playerList.innerHTML = '<div style="color:#bdc3c7;font-size:11px;padding:5px;">Aucun écran approuvé en ligne</div>';
+                } else {
+                    approvedPlayers.forEach(pid => {
+                        const p = players[pid];
+                        const isCurrentlyPlaying = p.manualPlaylistId === playlistId;
+                        const checkState = isCurrentlyPlaying ? 'checked' : '';
+                        
+                        const div = document.createElement('div');
+                        div.style.display = 'flex';
+                        div.style.alignItems = 'center';
+                        div.style.gap = '8px';
+                        div.innerHTML = `
+                            <input type="checkbox" class="publish-player-check" value="${p.id}" id="pub-play-${p.id}" ${checkState} style="width:auto;margin:0;">
+                            <label for="pub-play-${p.id}" style="color:white;font-size:12px;cursor:pointer;">🖥️ ${p.name} ${isCurrentlyPlaying ? '<span style="color:#2ecc71;font-size:10px;">(Actif)</span>' : ''}</label>
+                        `;
+                        playerList.appendChild(div);
+                    });
+                }
+            } catch (err) {
+                console.error(err);
+                groupList.innerHTML = '<div style="color:#e74c3c;font-size:11px;padding:5px;">Erreur de chargement.</div>';
+                playerList.innerHTML = '<div style="color:#e74c3c;font-size:11px;padding:5px;">Erreur de chargement.</div>';
+            }
+        }
+        
+        function closePublishModal() {
+            document.getElementById('publish-modal').style.display = 'none';
+        }
+        
+        async function submitPublishAssignment() {
+            const groupChecks = document.querySelectorAll('.publish-group-check:checked');
+            const playerChecks = document.querySelectorAll('.publish-player-check:checked');
+            
+            const groupIds = Array.from(groupChecks).map(c => c.value);
+            const playerIds = Array.from(playerChecks).map(c => c.value);
+            
+            if (groupIds.length === 0 && playerIds.length === 0) {
+                alert("Veuillez sélectionner au moins un groupe ou un écran.");
+                return;
+            }
+            
+            try {
+                const res = await fetch(`/api/admin/playlists/${playlistId}/publish`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ playerIds, groupIds })
+                });
+                
+                if (res.ok) {
+                    showToast('Le diaporama a été validé et publié avec succès !');
+                    closePublishModal();
+                    playlistData.status = 'approved';
+                    updateStatusAndButtons();
+                } else {
+                    const err = await res.text();
+                    alert('Erreur lors de la publication : ' + err);
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Erreur de connexion.');
+            }
+        }
+
+        function previewPlaylist() {
+            if (!playlistId) return showToast("Veuillez d'abord enregistrer le diaporama.", "error");
+            const url = `/player?id=${playlistId}&token=${token}`;
+            window.open(url, '_blank');
+        }
+
+        function showToast(message, type = 'success') {
+            let toast = document.getElementById('toast-notification');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast-notification';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = (type === 'success' ? '✅ ' : '❌ ') + message;
+            toast.style.background = type === 'success' ? '#2ebd7a' : '#e74c3c';
+            toast.style.display = 'flex';
+            
+            // Force reflow
+            toast.offsetHeight;
+            
+            toast.className = 'toast show';
+            
+            setTimeout(() => {
+                toast.className = 'toast';
+                setTimeout(() => { toast.style.display = 'none'; }, 300);
+            }, 3000);
+        }
+
         function formatClock(date, format) {
-            const h24 = date.getHours();
-            const h12 = h24 % 12 || 12;
-            const hours24 = String(h24).padStart(2, '0');
-            const hours12 = String(h12).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const seconds = String(date.getSeconds()).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
-            const month = String(date.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+            const month = String(date.getMonth() + 1).padStart(2, '0');
             const year = date.getFullYear();
-            const yearShort = String(year).slice(-2);
 
             return format
-                .replace(/HH/g, hours24)
-                .replace(/hh/g, hours12)
+                .replace(/HH/g, hours)
                 .replace(/mm/g, minutes)
                 .replace(/ss/g, seconds)
                 .replace(/DD/g, day)
-                .replace(/jj/g, day)
                 .replace(/MM/g, month)
-                .replace(/YYYY/g, year)
-                .replace(/aaaa/g, year)
-                .replace(/aa/g, yearShort);
+                .replace(/YYYY/g, year);
         }
 
-        // Gestion des touches Suppr / Backspace pour supprimer zones ou vignettes
         document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-
+            if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
             if (e.key === 'Delete' || e.key === 'Backspace') {
-                if (selectedZoneIndex !== -1) {
-                    deleteZone();
-                } else if (selectedIndex !== -1) {
-                    deleteCurrentItem();
+                if (selectedZoneIndex !== -1) deleteZone();
+                else if (selectedIndex !== -1) deleteCurrentItem();
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') { // Ctrl+Z
+                e.preventDefault();
+                undo();
+            } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { // Ctrl+Y ou Ctrl+Shift+Z
+                e.preventDefault();
+                redo();
+            }
+
+            // Déplacement de la zone sélectionnée avec les flèches directionnelles
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                if (selectedIndex !== -1 && selectedZoneIndex !== -1) {
+                    e.preventDefault();
+                    if (!e.repeat) {
+                        saveStateForUndo();
+                    }
+                    const zone = playlistData.items[selectedIndex].zones[selectedZoneIndex];
+                    let step = useGrid ? GRID_SIZE : 1;
+                    if (e.shiftKey) {
+                        step = useGrid ? GRID_SIZE * 5 : 5;
+                    }
+                    
+                    if (e.key === 'ArrowUp') {
+                        zone.y = Math.max(0, zone.y - step);
+                    } else if (e.key === 'ArrowDown') {
+                        zone.y = Math.min(100 - zone.h, zone.y + step);
+                    } else if (e.key === 'ArrowLeft') {
+                        zone.x = Math.max(0, zone.x - step);
+                    } else if (e.key === 'ArrowRight') {
+                        zone.x = Math.min(100 - zone.w, zone.x + step);
+                    }
+                    
+                    zone.x = applySnap(zone.x);
+                    zone.y = applySnap(zone.y);
+                    
+                    renderPreview();
                 }
             }
         });
 
-        // Gestion des raccourcis clavier pour Undo/Redo
-        document.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') { // Ctrl+Z ou Cmd+Z
-                e.preventDefault();
-                undo();
-            } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { // Ctrl+Y, Cmd+Y, ou Ctrl+Shift+Z, Cmd+Shift+Z
-                e.preventDefault();
-                redo();
+        document.addEventListener('focusin', (e) => {
+            if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
+                saveStateForUndo();
             }
         });
 
         init();
     </script>
+    
+    <!-- Éléments pour l'import PPTX -->
+    <input type="file" id="pptx-import-input" accept=".pptx" style="display: none;" onchange="importPptxInEditor()">
+    
+    <div id="editor-loading-overlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <h2 style="margin: 0 0 10px 0; color: white;" id="pptx-loading-title">Importation du PowerPoint en cours</h2>
+        <div id="pptx-progress-container" style="width: 300px; height: 10px; background: #34495e; border-radius: 5px; margin-bottom: 10px; overflow: hidden; display: none;">
+            <div id="pptx-progress-bar" style="width: 0%; height: 100%; background: #2ecc71; transition: width 0.1s;"></div>
+        </div>
+        <p style="margin: 0; color: #bdc3c7; font-size: 14px;" id="pptx-loading-text">Conversion des diapositives en images (LibreOffice + pdftocairo)... Veuillez patienter.</p>
+    </div>
+    
+    <!-- Modal pour sélectionner un PPTX existant -->
+    <div id="pptx-select-modal" class="loading-overlay" style="display: none; align-items: center; justify-content: center; z-index: 10100;">
+        <div style="background: #1a252f; padding: 20px; border-radius: 8px; border: 1px solid #34495e; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column;">
+            <h3 style="margin-top: 0; color: white; border-bottom: 1px dashed #34495e; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                <span>Sélectionner un PPTX existant</span>
+                <button type="button" onclick="closePptxSelectModal()" style="background: none; border: none; color: #bdc3c7; font-size: 20px; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+            </h3>
+            <div id="pptx-select-list" style="max-height: 300px; overflow-y: auto; margin: 15px 0; display: flex; flex-direction: column; gap: 8px;">
+                <!-- Liste des PPTX générée en JS -->
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closePptxSelectModal()" style="background: #34495e; padding: 8px 15px; border: none; color: white; border-radius: 4px; cursor: pointer;">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Publication (Associer à des écrans / groupes) -->
+    <div id="publish-modal" class="loading-overlay" style="display: none; align-items: center; justify-content: center; z-index: 10100;">
+        <div style="background: #1a252f; padding: 20px; border-radius: 8px; border: 1px solid #34495e; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column;">
+            <h3 style="margin-top: 0; color: white; border-bottom: 1px dashed #34495e; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                <span>📢 Publier sur les écrans</span>
+                <button type="button" onclick="closePublishModal()" style="background: none; border: none; color: #bdc3c7; font-size: 20px; cursor: pointer; padding: 0; line-height: 1;">&times;</button>
+            </h3>
+            
+            <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 15px;">
+                <!-- Section Groupes -->
+                <div>
+                    <strong style="color: #9b59b6; display: block; margin-bottom: 5px; font-size: 13px;">Groupes d'écrans :</strong>
+                    <div id="publish-groups-list" style="max-height: 120px; overflow-y: auto; background: #2c3e50; border-radius: 4px; padding: 8px; border: 1px solid #34495e; display: flex; flex-direction: column; gap: 5px;">
+                        <!-- Rempli en JS -->
+                    </div>
+                </div>
+                
+                <!-- Section Écrans Individuels -->
+                <div>
+                    <strong style="color: #3498db; display: block; margin-bottom: 5px; font-size: 13px;">Écrans individuels :</strong>
+                    <div id="publish-players-list" style="max-height: 120px; overflow-y: auto; background: #2c3e50; border-radius: 4px; padding: 8px; border: 1px solid #34495e; display: flex; flex-direction: column; gap: 5px;">
+                        <!-- Rempli en JS -->
+                    </div>
+                </div>
+            </div>
+            
+            <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px dashed #34495e; padding-top: 12px;">
+                <button type="button" onclick="closePublishModal()" style="background: #34495e; padding: 8px 15px; border: none; color: white; border-radius: 4px; cursor: pointer;">Annuler</button>
+                <button type="button" onclick="submitPublishAssignment()" style="background: #27ae60; padding: 8px 15px; border: none; color: white; border-radius: 4px; cursor: pointer; font-weight: bold;">Valider et Publier</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

@@ -34,6 +34,7 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
@@ -93,13 +94,22 @@
     <script>
         let token = localStorage.getItem('pidyn_token');
         let socket = null;
+        let role = localStorage.getItem('pidyn_role');
 
         if (!token) window.location.href = '/';
 
         function logout() {
             localStorage.removeItem('pidyn_token');
             localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
             window.location.href = '/';
+        }
+
+        if (role !== 'admin') {
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('nav button[onclick*="/users"], nav button[onclick*="/systeme"], nav button[onclick*="/sites"]').forEach(b => b.style.display = 'none');
+            });
         }
 
         function setupSocket() {
@@ -149,7 +159,11 @@
                             <select onchange="assign('${id}', this.value)" style="margin-top: 5px; font-size: 0.9em;">
                                 <option value="">Assigner...</option>
                                 <optgroup label="Diaporamas">
-                                    ${Object.keys(playlists).map(pId => `<option value="p:${pId}" ${p.manualPlaylistId === pId ? 'selected' : ''}>${playlists[pId].name}</option>`).join('')}
+                                    ${Object.keys(playlists).map(pId => {
+                                        const pl = playlists[pId];
+                                        const statusLabel = pl.status && pl.status !== 'approved' ? ` (${pl.status === 'pending' ? 'En attente' : 'Brouillon'})` : '';
+                                        return `<option value="p:${pId}" ${p.manualPlaylistId === pId ? 'selected' : ''}>${pl.name}${statusLabel}</option>`;
+                                    }).join('')}
                                 </optgroup>
                                 <optgroup label="Séquences">
                                     ${Object.keys(sequences).map(sId => `<option value="s:${sId}" ${p.manualSequenceId === sId ? 'selected' : ''}>${sequences[sId].name}</option>`).join('')}
@@ -177,7 +191,11 @@
             });
 
             document.getElementById('assign-playlist-select').innerHTML = 
-                Object.keys(playlists).map(id => `<option value="p:${id}">Diaporama: ${playlists[id].name}</option>`).join('') +
+                Object.keys(playlists).map(id => {
+                    const pl = playlists[id];
+                    const statusLabel = pl.status && pl.status !== 'approved' ? ` (${pl.status === 'pending' ? 'En attente' : 'Brouillon'})` : '';
+                    return `<option value="p:${id}">Diaporama: ${pl.name}${statusLabel}</option>`;
+                }).join('') +
                 Object.keys(sequences).map(id => `<option value="s:${id}">Séquence: ${sequences[id].name}</option>`).join('');
 
             document.getElementById('alert-target').innerHTML = '<option value="">Tous les écrans</option>' + 

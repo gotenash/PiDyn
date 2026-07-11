@@ -22,14 +22,19 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 
 ## Features
 ### Server-side (Node.js)
-*   **Web-based Administration Panel:** A user-friendly interface (`admin.html`, `editor.html`, `users.html`, `player.html`) for managing all aspects of the digital signage system.
+*   **Web-based Administration Panel:** A user-friendly interface (`admin.html`, `editor.html`, `users.html`, `diaporamas.html`, `media.html`, `sites.html`) for managing all aspects of the digital signage system.
+*   **Multi-Site Isolation (Multi-Tenancy):** Group players, playlists, groups, media, and users within isolated "Sites" for clean multi-tenant management. Non-admin users are restricted to their assigned site.
+*   **Role-Based Access Enforcement:** Authors are only allowed to modify or delete their own playlists and media files, preventing unauthorized modifications on other files.
+*   **Enriched Statistics Dashboard:** A premium visual grid showing online/offline status, playlists/sequences/media counts, and the current active site name, with isolated analytics graphs per site.
+*   **Asynchronous YouTube & PPTX Imports:** Non-blocking processing of files. Slides and YouTube downloads run in the background while real-time progress bars (using XMLHttpRequest and WebSockets) keep the user updated.
+*   **YouTube Bypass (Cookies):** Bypass YouTube's aggressive bot detection (HTTP 429) by uploading a standard Netscape browser `cookies.txt` file directly in the system settings panel.
 *   **Real-time Flash Messaging:** Send instant alerts (info, warning, danger) to specific screens or all devices simultaneously.
 *   **Advanced Analytics:** Track media playback frequency and duration with visual charts (Chart.js) and a "Top 50" leaderboard.
 *   **Remote Device Control:** Take screenshots, force synchronization, clear local cache, or restart the client service directly from the dashboard.
 *   **Group Management:** Organize players by location or category to assign content or trigger actions at scale.
 *   **User Management:** Create and manage users with different roles (admin, editor, author) for granular access control. Passwords are securely hashed using bcrypt.
 *   **Playlist Management:** Create, edit, and delete dynamic playlists composed of various media types (images, videos).
-*   **Media Management:** Upload and organize media files (images, videos) to be used in playlists.
+*   **Media Management:** Upload and organize media files (images, videos, custom fonts) with grid/list view toggles, custom search filter, and sorting.
 *   **Player Management:** Register, approve, and assign specific playlists to individual Raspberry Pi display units. Monitor their status (last seen).
 *   **Content Scheduling:** Implement time-based scheduling to automatically switch playlists on players at predefined times.
 *   **Real-time Updates:** Utilizes Socket.IO to push instant playlist changes and updates to connected Raspberry Pi clients.
@@ -38,13 +43,15 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 *   **Authentication:** API key-based authentication for Raspberry Pi clients and token-based authentication for the administration panel.
 *   **System Logs:** Automated timestamps on all server and client logs for easier troubleshooting.
 *   **Standalone Executable:** Capability to package the server as a single `.exe` (Windows) or binary (Linux) using `pkg` for easier distribution.
-*   **PPTX Import (Planned):** Suggested structure for importing PowerPoint presentations and converting slides to images for playlists.
-### Client-side (Raspberry Pi)
+*   **PPTX Import:** Fully functional import of PowerPoint presentations converting slides into playlist images (requires `LibreOffice` and `pdftocairo` on the server).
+*   **YouTube Media Import:** Direct YouTube video downloading and importing to the media library using `yt-dlp`.
+*   **Interactive Slideshow Vignettes:** Grid/List view switcher. Grid view features animated thumbnails that cycle through the playlist slides, dynamically rendering the page background, scaled text layers (with custom fonts, alignment, colors), media images, media videos, clocks, and full templates (canteen, meeting status, weather, full-screen video with captions).
+### Client-side (Raspberry Pi & Windows)
 *   **Automated Setup:** Improved `bash` script (`setup_pi.sh`) compatible with Debian 12 (Bookworm) and 13 (Trixie), handling automated installation of Node.js, Chromium, and X11.
 *   **Kiosk Mode:** Advanced Chromium configuration (auto-login, cursor hiding with `unclutter`, hardware acceleration) for a professional full-screen experience.
 *   **Automatic Boot:** Automatic configuration of LightDM and Openbox to start the player immediately upon power-up.
 *   **Systemd Service:** Sets up `sync-engine.js` as a systemd service for automatic startup and background operation.
-*   **Real-time Playlist Synchronization:** The `sync-engine.js` client connects to the server via Socket.IO to receive playlist updates.
+*   **Real-time Playlist Synchronization:** The client player connects to the server via Socket.IO to receive playlist updates.
 *   **Enhanced Monitoring:** Reports network status (IP, MAC), WiFi details (SSID, Signal Quality), and playback progress to the CMS.
 *   **Media Synchronization:** Automatically downloads and caches media files locally from the server, ensuring smooth playback and offline capability.
 *   **Configurable:** Reads device-specific configuration (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) from `/boot/setup.txt`.
@@ -57,7 +64,11 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 
 ## Getting Started
 ### Server Setup
-1.  **Prerequisites:** Ensure Node.js and npm are installed on your server.
+1.  **Prerequisites:** 
+    *   Ensure **Node.js** and **npm** are installed on your server.
+    *   For **PPTX Import**: Install **LibreOffice** (headless) and **pdftocairo** (often part of `poppler-utils` on Linux).
+    *   For **YouTube Import**: Place the **yt-dlp** executable in the `server/` directory or make it globally available on your path.
+    *   For **Bypassing YouTube bot blocks/HTTP 429**: Install a browser extension (e.g. "Get cookies.txt LOCALLY") to export your browser's YouTube session cookies and import `cookies.txt` into the server's **System** settings.
 2.  **Option A: Standard Installation:**
    ```bash
    git clone https://github.com/gotenash/PiDyn.git
@@ -130,32 +141,39 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 
 ## Fonctionnalités
 ### Côté Serveur (Node.js)
-*   **Panneau d'Administration Web:** Une interface conviviale (`admin.html`, `editor.html`, `users.html`, `player.html`) pour gérer tous les aspects du système d'affichage dynamique.
+*   **Panneau d'Administration Web :** Une interface conviviale (`admin.html`, `editor.html`, `users.html`, `diaporamas.html`, `media.html`, `sites.html`) pour gérer tous les aspects du système d'affichage dynamique.
+*   **Cloisonnement Multi-Site :** Regroupez les utilisateurs et isolez les écrans/diaporamas/groupes/médias par "Site" pour une gestion multi-entités totalement étanche. Les utilisateurs non-administrateurs sont confinés à leur site d'affectation.
+*   **Sécurisation des Droits Auteur :** Les auteurs ne peuvent modifier et supprimer que les diaporamas et médias dont ils sont propriétaires, éliminant tout risque de modification ou de suppression non autorisée.
+*   **Tableau de Bord de Statistiques Enrichi :** Rendu visuel moderne avec compteurs d'écrans en ligne/hors ligne, diaporamas, séquences, médias, et le nom du site de l'utilisateur actif, accompagnée de graphiques d'analyse isolés par site.
+*   **Imports Asynchrones YouTube & PPTX :** Processus non bloquant. La conversion PowerPoint et le téléchargement YouTube s'effectuent en arrière-plan, tandis qu'une barre de progression dynamique en temps réel (via XMLHttpRequest et WebSockets) informe l'utilisateur.
+*   **Contournement de la Détection de Robots (Cookies YouTube) :** Chargez un fichier `cookies.txt` de navigateur directement depuis l'onglet Système du CMS pour bypasser les blocages antirobots de YouTube (erreur 429).
 *   **Messages Flash en Temps Réel :** Envoyez des alertes instantanées (info, attention, danger) à des écrans spécifiques ou à tout le parc.
 *   **Analyses et Statistiques :** Suivez la fréquence et la durée de diffusion des médias avec des graphiques visuels et un classement "Top 50".
 *   **Contrôle à Distance :** Prenez des captures d'écran, forcez la synchronisation, videz le cache ou redémarrez le service client à distance.
 *   **Gestion des Groupes :** Organisez les afficheurs par emplacement ou catégorie pour des actions groupées.
-*   **Gestion des Utilisateurs:** Créez et gérez des utilisateurs avec différents rôles (administrateur, éditeur, auteur) pour un contrôle d'accès granulaire. Les mots de passe sont hachés de manière sécurisée à l'aide de bcrypt.
-*   **Gestion des Playlists:** Créez, modifiez et supprimez des playlists dynamiques composées de divers types de médias (images, vidéos).
-*   **Gestion des Médias:** Téléchargez et organisez les fichiers multimédias (images, vidéos) à utiliser dans les playlists.
-*   **Gestion des Lecteurs (Players):** Enregistrez, approuvez et attribuez des playlists spécifiques à des unités d'affichage Raspberry Pi individuelles. Surveillez leur statut (dernière connexion).
-*   **Planification de Contenu:** Mettez en œuvre une planification basée sur le temps pour changer automatiquement les playlists sur les lecteurs à des heures prédéfinies.
-*   **Mises à Jour en Temps Réel:** Utilise Socket.IO pour envoyer instantanément les modifications et les mises à jour des playlists aux clients Raspberry Pi connectés.
+*   **Gestion des Utilisateurs :** Créez et gérez des utilisateurs avec différents rôles (administrateur, éditeur, auteur) pour un contrôle d'accès granulaire. Les mots de passe sont hachés de manière sécurisée à l'aide de bcrypt.
+*   **Gestion des Playlists :** Créez, modifiez et supprimez des playlists dynamiques composées de divers types de médias (images, vidéos).
+*   **Gestion des Médias :** Téléchargez et organisez les fichiers multimédias (images, vidéos, polices personnalisées) avec commutateurs d'affichage grille/liste, filtre de recherche personnalisé et tri.
+*   **Gestion des Lecteurs (Players) :** Enregistrez, approuvez et attribuez des playlists spécifiques à des unités d'affichage Raspberry Pi individuelles. Surveillez leur statut (dernière connexion).
+*   **Planification de Contenu :** Mettez en œuvre une planification basée sur le temps pour changer automatiquement les playlists sur les lecteurs à des heures prédéfinies.
+*   **Mises à Jour en Temps Réel :** Utilise Socket.IO pour envoyer instantanément les modifications et les mises à jour des playlists aux clients Raspberry Pi connectés.
 *   **Maintenance et Sauvegarde :** Outil intégré de sauvegarde et restauration au format ZIP (Base de données + Médias).
-*   **Persistance des Données:** Stocke toutes les configurations, les données utilisateur, les playlists et les planifications dans une base de données SQLite (`pidyn.sqlite`).
-*   **Authentification:** Authentification par clé API pour les clients Raspberry Pi et authentification par jeton pour le panneau d'administration.
+*   **Persistance des Données :** Stocke toutes les configurations, les données utilisateur, les playlists et les planifications dans une base de données SQLite (`pidyn.sqlite`).
+*   **Authentification :** Authentification par clé API pour les clients Raspberry Pi et authentification par jeton pour le panneau d'administration.
 *   **Logs Système :** Horodatage automatique des logs serveur et client pour faciliter le dépannage.
 *   **Exécutable Autonome :** Possibilité de packager le serveur en un seul fichier `.exe` (Windows) ou binaire (Linux) via `pkg` pour une distribution simplifiée.
-*   **Import PPTX (Prévu):** Structure suggérée pour l'importation de présentations PowerPoint et la conversion des diapositives en images pour les playlists.
-### Côté Client (Raspberry Pi)
-*   **Installation Automatisée:** Script `setup_pi.sh` amélioré et compatible Debian 12 (Bookworm) et 13 (Trixie), gérant l'installation auto de Node.js, Chromium et X11.
-*   **Mode Kiosque :** Configuration avancée de Chromium (auto-login, masquage souris via `unclutter`, accélération matérielle) pour un rendu plein écran professionnel.
+*   **Import PPTX :** Importation de présentations PowerPoint entièrement fonctionnelle, convertissant les diapositives en images pour les playlists (nécessite `LibreOffice` et `pdftocairo` sur le serveur).
+*   **Import Vidéo YouTube :** Importation directe de vidéos YouTube dans la médiathèque à l'aide de `yt-dlp`.
+*   **Vignettes de Diaporamas Interactives :** Commutateur Grille/Liste. La vue Grille propose des vignettes animées qui font défiler les pages en rendant l'arrière-plan et en adaptant dynamiquement à l'échelle les calques de texte (avec polices personnalisées, alignement, couleurs), les horloges, les éléments web, les images/vidéos ainsi que les modèles prédéfinis (menu cantine, statut de réunion, météo).
+### Côté Client (Raspberry Pi & Windows)
+*   **Installation Automatisée :** Script `setup_pi.sh` amélioré et bicolore, compatible Debian 12 (Bookworm) et 13 (Trixie), gérant l'installation automatique de Node.js, Chromium et X11.
+*   **Mode Kiosque :** Configuration avancée de Chromium (connexion auto, masquage souris via `unclutter`, accélération matérielle) pour un rendu plein écran professionnel.
 *   **Démarrage Automatique :** Configuration automatique de LightDM et Openbox pour lancer le lecteur dès la mise sous tension.
-*   **Service Systemd:** Configure `sync-engine.js` en tant que service systemd pour un démarrage automatique et un fonctionnement en arrière-plan.
-*   **Synchronisation des Playlists en Temps Réel:** Le client `sync-engine.js` se connecte au serveur via Socket.IO pour recevoir les mises à jour des playlists.
-*   **Surveillance Améliorée :** Remontée des infos réseau (IP, MAC), du WiFi (SSID, Signal) et de la progression des téléchargements.
-*   **Synchronisation des Médias:** Télécharge et met en cache automatiquement les fichiers multimédias localement depuis le serveur, assurant une lecture fluide et une capacité hors ligne.
-*   **Configurable:** Lit la configuration spécifique à l'appareil (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) à partir de `/boot/setup.txt`.
+*   **Service Systemd :** Configure le lecteur en tant que service systemd pour un démarrage automatique et un fonctionnement en arrière-plan.
+*   **Synchronisation des Playlists en Temps Réel :** Le lecteur se connecte au serveur via Socket.IO pour recevoir les mises à jour des playlists.
+*   **Surveillance Améliorée :** Remontée des infos réseau (IP, MAC), du WiFi (SSID, Signal) et de la progression des téléchargements/lectures.
+*   **Synchronisation des Médias :** Télécharge et met en cache automatiquement les fichiers multimédias localement depuis le serveur, assurant une lecture fluide et une capacité hors ligne.
+*   **Configurable :** Lit la configuration spécifique à l'appareil (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) à partir de `/boot/setup.txt`.
 
 ## Technologies Utilisées
 *   **Backend:** Node.js, Express.js, Socket.IO, fs-extra, multer, bcrypt, axios
@@ -165,7 +183,11 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 
 ## Démarrage Rapide
 ### Configuration du Serveur
-1.  **Prérequis:** Assurez-vous que Node.js et npm sont installés sur votre serveur.
+1.  **Prérequis :** 
+    *   Assurez-vous que **Node.js** et **npm** sont installés sur votre serveur.
+    *   Pour **l'importation PPTX** : Installez **LibreOffice** (mode headless/sans tête) et **pdftocairo** (généralement inclus dans `poppler-utils` sous Linux).
+    *   Pour **l'importation YouTube** : Placez l'exécutable **yt-dlp** dans le dossier `server/` ou installez-le globalement et rendez-le disponible dans votre PATH.
+    *   Pour **le contournement des limites/robots YouTube** : Installez une extension (ex: "Get cookies.txt LOCALLY") pour exporter les cookies YouTube de votre navigateur et téléversez le fichier `cookies.txt` dans la page **Système** de l'administration.
 2.  **Option A : Installation Standard :**
    ```bash
    git clone https://github.com/gotenash/PiDyn.git

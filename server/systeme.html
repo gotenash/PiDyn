@@ -24,6 +24,7 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
@@ -81,13 +82,32 @@
         </div>
     </section>
 
+    <section>
+        <h2>Contournement des limitations YouTube (Cookies)</h2>
+        <p style="margin-top: 0; color: #bdc3c7; font-size: 14px;">
+            Si YouTube bloque les téléchargements avec l'erreur "Too Many Requests" (429) ou demande de valider que vous n'êtes pas un robot, vous pouvez exporter le fichier de cookies de votre navigateur (via une extension comme "Get cookies.txt LOCALLY") et le téléverser ici.
+        </p>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button onclick="document.getElementById('cookies-input').click()" style="background: #9b59b6;">📤 Importer cookies.txt</button>
+            <input type="file" id="cookies-input" style="display:none" accept=".txt" onchange="uploadCookies(this)">
+            <button onclick="deleteCookies()" id="btn-delete-cookies" class="danger" style="display: none;">🗑️ Supprimer les cookies</button>
+            <span id="cookies-status" style="font-weight: bold; margin-left: 10px;">Statut : Recherche...</span>
+        </div>
+    </section>
+
     <script>
         let token = localStorage.getItem('pidyn_token');
         let role = localStorage.getItem('pidyn_role');
 
         if (!token || role !== 'admin') { alert("Accès réservé aux administrateurs"); window.location.href = '/'; }
 
-        function logout() { localStorage.removeItem('pidyn_token'); localStorage.removeItem('pidyn_role'); window.location.href = '/'; }
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
 
         async function load() {
             const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
@@ -106,6 +126,7 @@
                 document.getElementById('set-smtp-pass').value = settings.smtpPass || '';
                 document.getElementById('set-notification-email').value = settings.notificationEmail || '';
             }
+            loadCookiesStatus();
         }
 
         function generateJWTSecret() {
@@ -175,6 +196,58 @@
             const res = await fetch('/api/admin/restore', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
             if (res.ok) { alert("Restauration réussie !"); logout(); }
         }
+
+        async function loadCookiesStatus() {
+            try {
+                const res = await fetch('/api/admin/system/cookies/status', { headers: { 'Authorization': `Bearer ${token}` } });
+                const { exists } = await res.json();
+                const statusSpan = document.getElementById('cookies-status');
+                const deleteBtn = document.getElementById('btn-delete-cookies');
+                if (exists) {
+                    statusSpan.innerText = "Statut : Cookies Actifs (Bypass activé)";
+                    statusSpan.style.color = "#2ecc71";
+                    deleteBtn.style.display = "inline-block";
+                } else {
+                    statusSpan.innerText = "Statut : Aucun fichier cookies actif";
+                    statusSpan.style.color = "#e74c3c";
+                    deleteBtn.style.display = "none";
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function uploadCookies(input) {
+            if (!input.files[0]) return;
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+            
+            const res = await fetch('/api/admin/system/cookies', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+            if (res.ok) {
+                alert("Fichier cookies.txt importé avec succès !");
+                input.value = '';
+                loadCookiesStatus();
+            } else {
+                alert("Erreur lors de l'import : " + await res.text());
+            }
+        }
+
+        async function deleteCookies() {
+            if (!confirm("Voulez-vous supprimer le fichier cookies.txt ?")) return;
+            const res = await fetch('/api/admin/system/cookies', {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                alert("Fichier cookies.txt supprimé.");
+                loadCookiesStatus();
+            }
+        }
+
         load();
     </script>
 </body>

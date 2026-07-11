@@ -22,6 +22,8 @@
             width: 100%; height: 100%;
             object-fit: cover;
             z-index: 1;
+            will-change: transform;
+            transform: translate3d(0,0,0);
         }
         #player-screen .zone {
             position: absolute;
@@ -30,12 +32,17 @@
             justify-content: center;
             align-items: center;
             z-index: 2;
+            will-change: transform;
+            transform: translate3d(0,0,0);
         }
         #player-screen .zone img,
         #player-screen .zone video {
             width: 100%;
             height: 100%;
             object-fit: contain; /* Garde l'aspect ratio, s'adapte à la zone */
+            will-change: transform; /* Force le GPU à gérer les transformations */
+            transform: translate3d(0,0,0); /* Crée un contexte de rendu 3D isolé */
+            backface-visibility: hidden; /* Empêche les artefacts 3D indésirables */
         }
         #player-screen .zone iframe {
             width: 100%;
@@ -116,7 +123,16 @@
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
 
         /* Templates Styles */
-        .tpl-container { width: 100%; height: 100%; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; z-index: 5; }
+        .tpl-container { 
+            width: 100%; height: 100%; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; z-index: 5; 
+            will-change: transform;
+            transform: translate3d(0,0,0);
+        }
+        .tpl-container video {
+            will-change: transform;
+            transform: translate3d(0,0,0);
+            backface-visibility: hidden;
+        }
         .tpl-header { font-size: 5vw; margin-bottom: 4vh; border-bottom: 3px solid #3498db; padding-bottom: 10px; font-weight: bold; }
         .tpl-content { display: flex; flex-direction: column; gap: 2vh; width: 80%; }
         .tpl-row { background: rgba(255,255,255,0.1); padding: 2vh; border-radius: 15px; display: flex; align-items: center; }
@@ -159,21 +175,20 @@
             const logEl = document.getElementById('debug-log');
             if (logEl) {
                 logEl.innerText = msg;
-                // On affiche toujours si c'est une erreur, sinon on respecte le réglage
                 if (isError) {
-                    logEl.style.display = 'block';
                     logEl.style.color = '#e74c3c'; // Rouge pour l'erreur
+                    logEl.style.display = 'block';
                 } else {
-                    // Sécurité si playlistData n'est pas encore défini ou si c'est la playlist vide par défaut
                     const hide = playlistData && playlistData.disableDebugLogs === true;
                     logEl.style.display = hide ? 'none' : 'block';
                     logEl.style.color = '#2ecc71'; // Vert normal
                 }
             }
-            if (msg.includes("Démarrage") || msg.includes("Page suivante") || msg.includes("lecture") || msg.includes("chargée")) {
+            // Masquer le loader dès qu'une activité de lecture commence ou que la playlist est prête
+            if (msg.includes("Démarrage") || msg.includes("suivante") || msg.includes("lecture") || msg.includes("chargée") || msg.includes("Playlist chargée")) {
                 document.getElementById('loader').style.display = 'none';
             }
-            if (isError) document.getElementById('status-extra').innerText = msg;
+            if (isError && document.getElementById('status-extra')) document.getElementById('status-extra').innerText = msg;
         }
 
         window.onerror = (m, u, l) => log(`Erreur JS ligne ${l}: ${m}`, true);
@@ -190,6 +205,7 @@
         const previewId = urlParams.get('id');
         const apiKey = urlParams.get('apiKey');
         
+        let socket = null;
         // Détection de l'URL du serveur
         let serverUrl = serverUrlParam || (window.location.hostname === "" ? "http://localhost:3000" : window.location.origin);
         if (serverUrl.endsWith('/')) serverUrl = serverUrl.slice(0, -1); // Nettoyage slash final
@@ -202,15 +218,22 @@
             script.async = true;
             script.onload = () => {
                 log("Script Socket.io chargé.");
-                if (typeof io === 'undefined') return log("Erreur: io non défini", true);
+                if (typeof io === 'undefined') {
+                    log("Erreur: io non défini", true);
+                    script.remove();
+                    return;
+                }
                 if (playlistData && playlistData.deviceId) initSocketWithId(playlistData.deviceId);
+            };
+            script.onerror = () => {
+                log("Échec chargement Socket.io (Serveur injoignable ?)", false);
+                script.remove();
             };
             document.head.appendChild(script);
         }
 
-        let socket = null;
         function initSocketWithId(dId) {
-            if (socket || typeof io === 'undefined') return;
+            if (socket || typeof io === 'undefined' || !dId) return;
             const finalServerUrl = playlistData.serverUrl || serverUrl;
             const targetKey = playlistData.apiKey || apiKey || 'ma_cle_secrete_123';
             
@@ -224,15 +247,15 @@
         };
 
         async function refreshPlaylist() {
+            // log("Vérification de la playlist..."); // Trop verbeux pour le log écran
             try {
                 let newData = null;
                 if (previewId && apiKey) {
                     const res = await fetch(`${serverUrl}/api/admin/data`, { headers: { 'X-API-KEY': apiKey } });
+                    if (!res.ok) throw new Error(`Erreur Serveur: ${res.status}`);
                     const data = await res.json();
                     newData = data.playlists[previewId];
                 } else {
-                    log("Chargement de la playlist locale...");
-                    // Suppression du nocache pour le protocole file:// (évite les erreurs de fichier non trouvé)
                     const url = window.location.protocol === 'file:' ? 'playlist.json' : 'playlist.json?nocache=' + Date.now();
                     let res;
                     try {
@@ -241,66 +264,65 @@
                         res = { ok: false, status: 0 };
                     }
 
-                    // Si le fichier n'existe pas encore (404), on affiche un message d'attente propre
                     if (res.status === 404 || (window.location.protocol === 'file:' && !res.ok)) {
-                        log("Fichier playlist absent, attente...");
-                        document.getElementById('loader').innerHTML = "En attente d'approbation sur le CMS...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
+                        log("En attente de contenu (playlist.json absent)...", false);
+                        document.getElementById('loader').innerHTML = "En attente de contenu...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
                         return setTimeout(refreshPlaylist, 10000);
                     }
 
                     if (!res.ok && res.status !== 0) throw new Error(`HTTP ${res.status}`);
-                    newData = await res.json();
-                    log("Playlist locale chargée.");
+                    
+                    const textData = await res.text();
+                    if (!textData || textData.trim() === "") {
+                        log("Fichier playlist vide, synchronisation en cours ?", false);
+                        return setTimeout(refreshPlaylist, 2000);
+                    }
+                    newData = JSON.parse(textData);
                 }
 
                 if (newData && newData.items && newData.items.length > 0) {
+                    log("Playlist chargée : " + newData.items.length + " éléments.");
                     const isNewPlaylist = newData.id !== currentPlaylistId;
-                    playlistData = newData;
-                    currentPlaylistId = newData.id;
+                    const splashUrl = newData.localSplashScreenUrl || newData.splashScreenUrl;
                     
-                    // On récupère l'IP du serveur depuis le fichier si elle n'est pas en paramètre
-                    if (!previewId) loadSocketIO(playlistData.serverUrl || serverUrl);
-                    document.getElementById('debug-log').style.display = 'none';
-
-                    // Si la playlist a changé d'ID, on force le redémarrage pour éviter les erreurs d'index
-                    if (isNewPlaylist && isPlaying) {
-                        log("Mise à jour de la playlist détectée.");
-                        currentIndex = 0;
-                        playNext();
-                        return;
+                    // Initialisation du socket si on a enfin le deviceId
+                    if (typeof io === 'undefined') {
+                        loadSocketIO(newData.serverUrl || serverUrl);
+                    } else if (newData.deviceId && !socket) {
+                        initSocketWithId(newData.deviceId);
                     }
                     
-                    const splashScreenElement = document.getElementById('splash-screen');
-                    const loaderElement = document.getElementById('loader');
-                    const authParam = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
-                    const splashUrl = playlistData.localSplashScreenUrl || playlistData.splashScreenUrl;
-                    
-                    if (splashUrl) {
-                        // Si c'est un chemin local (./media/...), on l'utilise tel quel.
-                        // Sinon, c'est un chemin distant (/img/...), on ajoute l'URL du serveur.
-                        if (splashUrl.startsWith('./')) {
-                            splashScreenElement.src = splashUrl;
-                        } else {
-                            const base = splashUrl.startsWith('http') ? '' : serverUrl;
+                    if (isNewPlaylist) {
+                        log("Changement de playlist détecté.");
+                        playlistData = newData;
+                        currentPlaylistId = newData.id;
+                        currentIndex = 0;
+                        
+                        if (splashUrl) {
+                            const splashScreenElement = document.getElementById('splash-screen');
+                            const authParam = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
+                            const base = splashUrl.startsWith('./') ? '' : serverUrl;
                             splashScreenElement.src = `${base}${splashUrl}${authParam}`;
-                        }
-                        splashScreenElement.style.display = 'block';
-                        loaderElement.style.display = 'none';
-                        document.getElementById('debug-log').style.display = 'none';
-                        log("Affichage du splashscreen.");
-                        // Le playNext sera appelé après la durée du splashscreen si nécessaire, ou directement
-                        // Pour l'instant, on démarre la playlist après un court délai pour laisser le splashscreen s'afficher
-                        if (!isPlaying) {
+                            splashScreenElement.style.display = 'block';
+                            document.getElementById('loader').style.display = 'none';
+                            
+                            if (playTimeout) clearTimeout(playTimeout);
                             isPlaying = true;
-                            setTimeout(playNext, 2000); // Afficher le splashscreen pendant 2 secondes
+                            playTimeout = setTimeout(playNext, 3000); 
+                        } else {
+                            isPlaying = true;
+                            playNext();
                         }
-                    } else if (!isPlaying) {
-                        log("Démarrage de la lecture (sans splashscreen).");
-                        isPlaying = true;
-                        loaderElement.style.display = 'none';
-                        playNext();
                     } else {
-                        log("Données mises à jour.");
+                        // Mise à jour simple des données sans couper la lecture
+                        playlistData = newData;
+                        log("Données de playlist synchronisées.");
+                    }
+                    
+                    // Afficher les alertes stockées dans le manifest
+                    if (playlistData.activeAlerts) {
+                        renderAlertsFromManifest(playlistData.activeAlerts);
+                        setTimeout(refreshPlaylist, 30000);
                     }
                 } else {
                     // Si on a des données mais pas d'items, c'est l'état "en attente" ou une playlist vide
@@ -313,8 +335,8 @@
                     setTimeout(refreshPlaylist, 10000);
                 }
             } catch (e) { 
-                log("Erreur : " + e.message, true);
-                setTimeout(refreshPlaylist, 5000); 
+                log("Attente de synchronisation...", false);
+                setTimeout(refreshPlaylist, 15000); 
             }
         }
 
@@ -365,7 +387,10 @@
                     if(!res.ok) throw new Error(`HTTP ${res.status}`);
                     // console.log("Stats envoyées avec succès");
                 })
-                .catch(err => log("Erreur stats: " + err.message, true));
+                .catch(err => {
+                    // Log silencieux dans la console du navigateur en cas d'erreur de statistiques hors-ligne
+                    console.warn("Erreur stats (hors-ligne ?) :", err.message);
+                });
             }
 
             // Nettoyer les intervalles d'horloge de la page précédente
@@ -430,7 +455,74 @@
                         <div style="font-size: 3vw; opacity: 0.8;">${page.data.subject || ''}</div>
                         <div class="tpl-meeting-status status-${statusClass}">${page.data.status}</div>`;
                 }
+                else if (page.template === 'video_fullscreen') {
+                    const videoUrl = page.data.localVideoUrl || page.data.videoUrl;
+                    let finalUrl = videoUrl;
+                    if (videoUrl && videoUrl.startsWith('/media') && !page.data.localVideoUrl) {
+                        finalUrl = `${targetServerUrl}${videoUrl}${playlistData.apiKey ? '?apiKey=' + playlistData.apiKey : ''}`;
+                    }
+                    tpl.style.padding = '0';
+                    const isMuted = page.data.muted === true;
+                    const fitMode = page.data.fitMode || 'cover';
+                    tpl.innerHTML = `
+                        <video src="${finalUrl}" autoplay playsinline muted ${page.data.loop ? 'loop' : ''} 
+                               style="width:100%; height:100%; object-fit:${fitMode}; pointer-events:none;"></video>
+                        ${page.data.legend ? `
+                            <div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.7); 
+                                        color:${page.data.legendColor || 'white'}; 
+                                        font-family:${page.data.legendFontFamily || 'sans-serif'};
+                                        padding:2vh; font-size:${(page.data.legendFontSize || 40) / 10}vw; 
+                                        text-align:center; z-index:10;">${page.data.legend}</div>` : ''}
+                    `;
+                } else if (page.template === 'weather') {
+                    const city = page.data.city || 'Paris';
+                    const lat = page.data.lat || '48.8566';
+                    const lon = page.data.lon || '2.3522';
+                    tpl.innerHTML = `<div class="tpl-header">MÉTÉO - ${city.toUpperCase()}</div><div id="weather-loader" style="font-size: 2vw;">Chargement des prévisions...</div>`;
+                    
+                    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode,temperature_2m&timezone=auto`)
+                        .then(r => r.json())
+                        .then(data => {
+                            const loader = tpl.querySelector('#weather-loader');
+                            if (loader) loader.remove();
+                            
+                            const periods = [
+                                { label: 'MATIN', timeLabel: '9h', index: 9 },
+                                { label: 'MIDI', timeLabel: '12h', index: 12 },
+                                { label: 'APRÈS-MIDI', timeLabel: '16h', index: 16 }
+                            ];
+                            
+                            const grid = document.createElement('div');
+                            grid.style.cssText = "display:flex; gap:2vw; justify-content:center; width:90%;";
+                            
+                            periods.forEach(p => {
+                                const icon = getWeatherIcon(data.hourly.weathercode[p.index]);
+                                const temp = Math.round(data.hourly.temperature_2m[p.index]);
+                                grid.innerHTML += `
+                                    <div style="background:rgba(255,255,255,0.1); padding:2vh; border-radius:20px; flex:1; text-align:center;">
+                                        <div style="font-size:1.5vw; color:#3498db; font-weight:bold; margin-bottom:0.5vh;">${p.label}</div>
+                                        <div style="font-size:1.2vw; opacity:0.6; margin-bottom:1vh;">${p.timeLabel}</div>
+                                        <div style="font-size:4vw; margin:1vh 0;">${icon}</div>
+                                        <div style="font-size:2.2vw; font-weight:bold;">${temp}°</div>
+                                    </div>`;
+                            });
+                            tpl.appendChild(grid);
+                        }).catch(() => { tpl.innerHTML = '<div class="tpl-header">Météo indisponible</div>'; });
+                }
+
                 pageZonesContainer.appendChild(tpl);
+
+                if (page.template === 'video_fullscreen') {
+                    const v = tpl.querySelector('video');
+                    const isMuted = page.data.muted === true;
+                    // Démarre toujours en muet (contourne la politique autoplay du navigateur)
+                    v.muted = true;
+                    v.play().then(() => {
+                        if (!isMuted) v.muted = false;
+                    }).catch(e => {
+                        console.warn("Autoplay vidéo échoué:", e);
+                    });
+                }
             }
 
             // Rendre les zones pour la page actuelle
@@ -463,7 +555,9 @@
                     // On utilise le chemin local si disponible, sinon le chemin distant avec l'URL du serveur
                     let mediaUrl = zone.localUrl || zone.url || "";
                     const token = apiKey || (playlistData && playlistData.apiKey);
-                    if (mediaUrl.startsWith('/media')) mediaUrl = `${serverUrl}${mediaUrl}${token ? '?apiKey=' + token : ''}`;
+                    if (mediaUrl.startsWith('/media') || mediaUrl.startsWith('/api/')) {
+                        mediaUrl = `${serverUrl}${mediaUrl}${token ? (mediaUrl.includes('?') ? '&' : '?') + 'apiKey=' + token : ''}`;
+                    }
 
                     if (zone.type === 'image') {
                         zoneElement.innerHTML = `<img src="${mediaUrl}">`;
@@ -471,11 +565,26 @@
                         const videoElement = document.createElement('video');
                         videoElement.src = mediaUrl;
                         videoElement.autoplay = true;
-                        videoElement.muted = true;
+                        videoElement.muted = true; // Démarre muet pour contourner la politique autoplay
                         videoElement.loop = true;
+                        videoElement.playsInline = true;
                         zoneElement.appendChild(videoElement);
+                        // Dé-muter après lancement si le son est souhaité
+                        videoElement.play().then(() => {
+                            if (!zone.muted) videoElement.muted = false;
+                        }).catch(() => { /* reste muet si lecture impossible */ });
                     } else if (zone.type === 'web') {
-                        zoneElement.innerHTML = `<iframe src="${mediaUrl}"></iframe>`;
+                        const zoom = zone.webZoom || 1.0;
+                        const panX = zone.webPanX || 0;
+                        const panY = zone.webPanY || 0;
+                        const iframeUrl = zone.url.startsWith('/') ? mediaUrl : zone.url;
+                        zoneElement.innerHTML = `<div style="width:100%;height:100%;overflow:hidden;position:relative;">
+                            <iframe src="${iframeUrl}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;"></iframe>
+                        </div>`;
+                    } else if (zone.type === 'qrcode') {
+                        const qrText = zone.text || 'https://pidyn.com';
+                        const qrUrl = zone.localUrl ? mediaUrl : `${serverUrl}/api/admin/qrcode?text=${encodeURIComponent(qrText)}${token ? '&apiKey=' + token : ''}`;
+                        zoneElement.innerHTML = `<img src="${qrUrl}" style="width:100%;height:100%;object-fit:contain;">`;
                     } else if (zone.type === 'text') {
                         const content = zone.isMarquee ? 
                             `<div class="marquee-container"><div class="marquee-content text-content">${zone.text || ''}</div></div>` :
@@ -547,28 +656,57 @@
                         updateTime();
                         activeClockIntervals.push(setInterval(updateTime, 1000));
                     }
-                    
+                    // Gestion du timing d'apparition (start) et de disparition (duration)
+                    const startMs = zone.start || 0;
+                    const durationMs = zone.duration || page.duration || 5000;
+                    const endMs = startMs + durationMs;
+
+                    if (startMs > 0) {
+                        zoneElement.style.display = 'none';
+                        setTimeout(() => {
+                            zoneElement.style.display = 'block';
+                            const videoElement = zoneElement.querySelector('video');
+                            if (videoElement) {
+                                videoElement.play().then(() => {
+                                    if (!zone.muted) videoElement.muted = false;
+                                }).catch(() => {});
+                            }
+                        }, startMs);
+                    }
+
                     // Programmer l'animation de sortie
                     if (zone.animationOut && zone.animationOut !== 'none') {
                         const outDuration = zone.animationOutDuration || 800;
                         setTimeout(() => {
                             zoneElement.classList.add(`anim-${zone.animationOut}`);
                             zoneElement.style.animationDuration = outDuration + 'ms';
-                        }, Math.max(0, page.duration - outDuration));
+                        }, Math.max(0, endMs - outDuration));
                     }
+
+                    setTimeout(() => {
+                        zoneElement.style.display = 'none';
+                    }, endMs);
 
                     pageZonesContainer.appendChild(zoneElement);
                 });
             }
 
-            // Logique de progression
-            if (currentIndex === playlistData.items.length - 1 && playlistData.sequenceContext && socket) {
-                playTimeout = setTimeout(() => {
+            // Logique de progression (Timeout ou Fin de vidéo)
+            const moveToNext = () => {
+                if (currentIndex === playlistData.items.length - 1 && playlistData.sequenceContext && socket) {
                     socket.emit('request-next-playlist-in-sequence');
-                }, page.duration);
+                } else {
+                    currentIndex = (currentIndex + 1) % playlistData.items.length;
+                    playNext();
+                }
+            };
+
+            const videoTpl = pageZonesContainer.querySelector('video');
+            if (page.template === 'video_fullscreen' && videoTpl && !page.data.loop) {
+                log(`Attente de la fin de la vidéo pour transition.`);
+                videoTpl.onended = moveToNext;
             } else {
-                currentIndex = (currentIndex + 1) % playlistData.items.length;
-                playTimeout = setTimeout(playNext, page.duration);
+                playTimeout = setTimeout(moveToNext, page.duration);
                 log(`Page suivante dans ${page.duration / 1000}s.`);
             }
         }
@@ -579,24 +717,38 @@
             return 'ℹ️';
         }
 
+        function displayAlert(alert) {
+            const overlay = document.getElementById('alert-overlay');
+            if (document.getElementById(`alert-${alert.id}`)) return;
+            const div = document.createElement('div');
+            div.id = `alert-${alert.id}`;
+            div.className = `flash-message flash-${alert.type}`;
+            
+            div.innerHTML = `
+                <span style="flex-shrink: 0;">${getAlertIcon(alert.type)}</span>
+                <div class="marquee-container" style="flex: 1;">
+                    <div class="marquee-content">${alert.text}</div>
+                </div>
+            `;
+            overlay.appendChild(div);
+        }
+
+        function renderAlertsFromManifest(alerts) {
+            const overlay = document.getElementById('alert-overlay');
+            const currentAlertIds = alerts.map(a => `alert-${a.id}`);
+            
+            // Supprimer les alertes qui ne sont plus dans le manifest
+            Array.from(overlay.children).forEach(child => {
+                if (!currentAlertIds.includes(child.id)) child.remove();
+            });
+
+            // Ajouter les nouvelles alertes
+            alerts.forEach(displayAlert);
+        }
+
         function setupSocketListeners() {
             if (!socket) return;
-            socket.on('show-alert', (alert) => {
-                const overlay = document.getElementById('alert-overlay');
-                if (document.getElementById(`alert-${alert.id}`)) return;
-                const div = document.createElement('div');
-                div.id = `alert-${alert.id}`;
-                div.className = `flash-message flash-${alert.type}`;
-                
-                // Utilisation de la structure marquee pour le texte de l'alerte
-                div.innerHTML = `
-                    <span style="flex-shrink: 0;">${getAlertIcon(alert.type)}</span>
-                    <div class="marquee-container" style="flex: 1;">
-                        <div class="marquee-content">${alert.text}</div>
-                    </div>
-                `;
-                overlay.appendChild(div);
-            });
+            socket.on('show-alert', (alert) => displayAlert(alert));
             socket.on('clear-alert', (id) => {
                 const el = document.getElementById(`alert-${id}`);
                 if (el) el.remove();
@@ -633,8 +785,23 @@
                 .replace(/aa/g, yearShort);
         }
 
+        function getWeatherIcon(code) {
+            if (code === 0) return '☀️';
+            if (code <= 3) return '☁️';
+            if (code <= 48) return '🌫️';
+            if (code <= 55) return '🌦️';
+            if (code <= 65) return '🌧️';
+            if (code <= 77) return '❄️';
+            if (code <= 82) return '🌦️';
+            if (code <= 99) return '⛈️';
+            return '❓';
+        }
+
+        // Démarrage de la détection socket
+        loadSocketIO(serverUrl);
+
         // On vérifie les mises à jour du fichier JSON toutes les 30s
-        setInterval(refreshPlaylist, 30000);
+        // setInterval(refreshPlaylist, 30000);
         refreshPlaylist();
     </script>
 </body>

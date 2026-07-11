@@ -13,6 +13,45 @@
         button.secondary { background: #6c757d; }
         button.danger { background: #e74c3c; }
         h1, h2 { color: #3498db; }
+
+        /* Commutateur Layout */
+        .layout-toggle-btn { background: #34495e; padding: 8px 12px; border-radius: 4px; border: 1px solid #34495e; color: white; cursor: pointer; font-size: 13px; }
+        .layout-toggle-btn.active { background: #3498db; border-color: #3498db; }
+
+        /* Conteneur Diaporamas */
+        #playlists-list { display: flex; flex-direction: column; gap: 8px; }
+        #playlists-list.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+
+        /* Vignette Diaporama */
+        .playlist-card { background: #1a252f; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid #34495e; box-shadow: 0 4px 6px rgba(0,0,0,0.15); transition: border-color 0.2s, box-shadow 0.2s; position: relative; }
+        .playlist-card:hover { border-color: #3498db; box-shadow: 0 6px 12px rgba(0,0,0,0.25); }
+        
+        .playlist-thumbnail { width: 100%; aspect-ratio: 16/9; position: relative; background-size: cover; background-position: center; display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 1px solid #34495e; transition: background-image 0.5s ease-in-out, background-color 0.5s ease-in-out, transform 0.3s ease-in-out; }
+        .playlist-card:hover .playlist-thumbnail { transform: scale(1.04); }
+        .playlist-badge { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+        .playlist-res-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #3498db; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+        
+        .playlist-card-overlay { position: absolute; inset: 0; background: rgba(26, 37, 47, 0.85); display: flex; align-items: center; justify-content: center; gap: 12px; opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0.2s ease; z-index: 10; }
+        .playlist-card:hover .playlist-card-overlay { opacity: 1; visibility: visible; }
+        
+        .playlist-card-overlay button { width: 40px; height: 40px; border-radius: 50%; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; border: none; cursor: pointer; transition: transform 0.2s; }
+        .playlist-card-overlay button:hover { transform: scale(1.1); }
+        .playlist-card-overlay button.secondary { background: #3498db; }
+        .playlist-card-overlay button.danger { background: #e74c3c; }
+
+        .playlist-card-details { padding: 12px 15px; display: flex; flex-direction: column; gap: 4px; }
+        .playlist-card-details strong { font-size: 14px; color: #ecf0f1; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        .playlist-card-details .meta { font-size: 11px; color: #bdc3c7; }
+
+        /* Mode Liste (comme actuellement) */
+        #playlists-list.list-view { display: flex; flex-direction: column; gap: 8px; }
+        #playlists-list.list-view .playlist-card { flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 15px; border-radius: 6px; background: #34495e; border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        #playlists-list.list-view .playlist-card:hover { transform: none; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        #playlists-list.list-view .playlist-thumbnail { display: none; }
+        #playlists-list.list-view .playlist-card-overlay { position: static; opacity: 1; visibility: visible; background: none; display: flex; gap: 6px; z-index: 1; }
+        #playlists-list.list-view .playlist-card-overlay button { width: auto; height: auto; border-radius: 4px; padding: 10px 15px; font-size: 14px; }
+        #playlists-list.list-view .playlist-card-details { padding: 0; }
+        #playlists-list.list-view .playlist-card-details strong { font-size: 15px; }
     </style>
 </head>
 <body>
@@ -28,15 +67,22 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
     <section>
         <h2>Mes Diaporamas</h2>
-        <div style="display:flex; gap:10px; margin-bottom:15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
             <button onclick="window.location.href='/editor'">+ Créer un nouveau diaporama</button>
+            
+            <div style="display: flex; gap: 5px; align-items: center;">
+                <label style="font-size: 14px; margin-right: 5px;">Affichage :</label>
+                <button type="button" class="layout-toggle-btn" id="layout-grid-btn" onclick="setLayoutMode('grid')">🖼️ Vignettes</button>
+                <button type="button" class="layout-toggle-btn" id="layout-list-btn" onclick="setLayoutMode('list')">📝 Liste</button>
+            </div>
         </div>
-        <div id="playlists-list"></div>
+        <div id="playlists-list" class="list-view"></div>
     </section>
 
     <section id="schedules-section">
@@ -56,46 +102,296 @@
     <script>
         let token = localStorage.getItem('pidyn_token');
         if (!token) window.location.href = '/';
+        let userRole = localStorage.getItem('pidyn_role');
+        let loggedInUsername = localStorage.getItem('pidyn_username');
 
-        function logout() { localStorage.removeItem('pidyn_token'); localStorage.removeItem('pidyn_role'); window.location.href = '/'; }
+        let layoutMode = localStorage.getItem('diaporamas_layout_mode') || 'list';
+        let globalPlaylists = {};
+        let activeThumbnailIntervals = {};
+
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
+
+        if (userRole !== 'admin') {
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('nav button[onclick*="/users"], nav button[onclick*="/systeme"], nav button[onclick*="/sites"]').forEach(b => b.style.display = 'none');
+            });
+        }
+
+        function getStatusBadgeHtml(status) {
+            status = status || 'approved';
+            if (status === 'draft') {
+                return `<span style="background: #7f8c8d; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; white-space: nowrap; margin-left: 5px;">Brouillon</span>`;
+            } else if (status === 'pending') {
+                return `<span style="background: #e67e22; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; white-space: nowrap; margin-left: 5px;">En attente</span>`;
+            } else {
+                return `<span style="background: #2ecc71; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; white-space: nowrap; margin-left: 5px;">Validé</span>`;
+            }
+        }
+
+        function getAuthenticatedUrl(url) {
+            if (!url) return '';
+            if (url.startsWith('data:')) return url;
+            return url.includes('?') ? `${url}&token=${token}` : `${url}?token=${token}`;
+        }
+
+        function getPageThumbnailHtml(playlist, item) {
+            const slideCount = playlist.items ? playlist.items.length : 0;
+            let html = `
+                <div class="playlist-res-badge" style="z-index: 9;">${playlist.resolution || '16/9'}</div>
+                <div class="playlist-badge" style="z-index: 9;">${slideCount} diapo${slideCount > 1 ? 's' : ''}</div>
+            `;
+            if (!item) return html;
+
+            if (item.template) {
+                let tplHtml = '';
+                if (item.template === 'canteen') {
+                    tplHtml = `
+                        <div style="color:#3498db; font-weight:bold; font-size:calc(24px * 0.12); border-bottom:1px solid #3498db; margin-bottom:5px; padding-bottom:2px; text-align:center;">${item.data.title || 'MENU'}</div>
+                        <div style="font-size:calc(16px * 0.12); line-height: 1.2; padding:0 5px;">
+                            <p style="margin:2px 0;"><b>Entrée:</b> ${item.data.starter || ''}</p>
+                            <p style="margin:2px 0;"><b>Plat:</b> ${item.data.main || ''}</p>
+                            <p style="margin:2px 0;"><b>Dessert:</b> ${item.data.dessert || ''}</p>
+                        </div>`;
+                } else if (item.template === 'meeting') {
+                    tplHtml = `
+                        <div style="font-size:calc(28px * 0.12); font-weight:bold; margin-bottom:2px; text-align:center;">${item.data.room || ''}</div>
+                        <div style="color:#bdc3c7; font-size:calc(18px * 0.12); margin-bottom:5px; text-align:center;">${item.data.subject || ''}</div>
+                        <div style="display:inline-block; margin:0 auto; padding:2px 8px; border-radius:10px; font-size:calc(12px * 0.12); background:${item.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${item.data.status || ''}</div>`;
+                } else if (item.template === 'video_fullscreen') {
+                    const authenticatedVideoUrl = getAuthenticatedUrl(item.data.videoUrl);
+                    tplHtml = item.data.videoUrl 
+                        ? `<video src="${authenticatedVideoUrl}" muted autoplay loop playsinline style="width:100%; height:100%; object-fit:${item.data.fitMode || 'cover'}; pointer-events:none;"></video>`
+                        : `<div style="color:#bdc3c7; font-size:8px; text-align:center;">Aucune vidéo</div>`;
+                    if (item.data.legend) {
+                        tplHtml += `<div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.6); color:${item.data.legendColor || 'white'}; font-size:calc(${(item.data.legendFontSize || 24) / 2}px * 0.12); padding:2px; text-align:center;">${item.data.legend}</div>`;
+                    }
+                } else if (item.template === 'weather') {
+                    const city = item.data.city || 'Paris';
+                    tplHtml = `
+                        <div style="color:#3498db; font-weight:bold; font-size:calc(24px * 0.12); margin-bottom:5px; text-align:center; width:100%;">${city.toUpperCase()}</div>
+                        <div style="font-size:8px; color:#bdc3c7; text-align:center;">🌤️ Météo</div>
+                    `;
+                }
+                html += `<div style="position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; pointer-events:none; z-index:2; overflow:hidden;">${tplHtml}</div>`;
+            } else if (item.zones) {
+                item.zones.forEach((zone, idx) => {
+                    let zoneHtml = '';
+                    const styleStr = `
+                        position: absolute;
+                        left: ${zone.x}%;
+                        top: ${zone.y}%;
+                        width: ${zone.w}%;
+                        height: ${zone.h}%;
+                        z-index: ${2 + idx};
+                        pointer-events: none;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        overflow: hidden;
+                        transform: ${zone.rotate ? `rotate(${zone.rotate}deg)` : ''} ${zone.skewX ? `skewX(${zone.skewX}deg)` : ''};
+                    `;
+
+                    if (zone.type === 'text') {
+                        zoneHtml = `<div style="color:${zone.color || 'white'}; font-size:calc(${zone.fontSize || 24}px * 0.12); font-family:${zone.fontFamily || 'sans-serif'}; text-align:${zone.textAlign || 'center'}; width:100%; word-wrap: break-word; line-height: 1.1;">${zone.text || ''}</div>`;
+                    } else if (zone.type === 'video' && zone.url) {
+                        const authenticatedZoneUrl = getAuthenticatedUrl(zone.url);
+                        zoneHtml = `<video src="${authenticatedZoneUrl}" muted autoplay loop playsinline style="width:100%;height:100%;object-fit:contain;"></video>`;
+                    } else if (zone.type === 'clock') {
+                        zoneHtml = `<div style="color:${zone.color || 'white'}; font-size:calc(${zone.fontSize || 24}px * 0.12); font-family:${zone.fontFamily || 'sans-serif'}; text-align:${zone.textAlign || 'center'}; width:100%;">12:00</div>`;
+                    } else if (zone.type === 'web' && zone.url) {
+                        zoneHtml = `<div style="font-size:8px; color:#3498db; text-align:center;">🌐 Web</div>`;
+                    } else if (zone.type === 'qrcode') {
+                        zoneHtml = `<div style="font-size:8px; color:#2ecc71; text-align:center;">📱 QR</div>`;
+                    } else if (zone.url) {
+                        const authenticatedZoneUrl = getAuthenticatedUrl(zone.url);
+                        zoneHtml = `<img src="${authenticatedZoneUrl}" style="max-width:100%; max-height:100%; object-fit:contain;">`;
+                    }
+
+                    html += `<div style="${styleStr}">${zoneHtml}</div>`;
+                });
+            }
+            return html;
+        }
+
+        function renderPageInThumbnail(thumbnailEl, playlist, item) {
+            if (!item) {
+                thumbnailEl.style.backgroundImage = 'none';
+                thumbnailEl.style.backgroundColor = '#1a252f';
+                thumbnailEl.innerHTML = getPageThumbnailHtml(playlist, null);
+                return;
+            }
+
+            const bgUrl = item.backgroundUrl || playlist.backgroundUrl;
+            const bgColor = item.backgroundColor || playlist.backgroundColor || '#1a252f';
+            if (bgUrl) {
+                const authenticatedBgUrl = getAuthenticatedUrl(bgUrl);
+                thumbnailEl.style.backgroundImage = `url('${authenticatedBgUrl}')`;
+                thumbnailEl.style.backgroundColor = 'transparent';
+            } else {
+                thumbnailEl.style.backgroundImage = 'none';
+                thumbnailEl.style.backgroundColor = bgColor;
+            }
+
+            thumbnailEl.innerHTML = getPageThumbnailHtml(playlist, item);
+        }
+
+        function setLayoutMode(mode) {
+            layoutMode = mode;
+            localStorage.setItem('diaporamas_layout_mode', mode);
+            
+            const listEl = document.getElementById('playlists-list');
+            if (mode === 'grid') {
+                listEl.classList.remove('list-view');
+                listEl.classList.add('grid-view');
+                document.getElementById('layout-grid-btn').classList.add('active');
+                document.getElementById('layout-list-btn').classList.remove('active');
+            } else {
+                listEl.classList.remove('grid-view');
+                listEl.classList.add('list-view');
+                document.getElementById('layout-list-btn').classList.add('active');
+                document.getElementById('layout-grid-btn').classList.remove('active');
+            }
+        }
 
         async function load() {
             const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
             const { players, playlists, sequences } = await res.json();
+            globalPlaylists = playlists;
 
-            document.getElementById('playlists-list').innerHTML = Object.keys(playlists).map(id => `
-                <div style="background:#34495e; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
-                    <span><strong>${playlists[id].name}</strong></span>
-                    <div>
-                        <button class="secondary" onclick="window.location.href='/editor?id=${id}'">✏️</button>
-                        <button class="danger" onclick="deletePlaylist('${id}')">🗑️</button>
+            setLayoutMode(layoutMode);
+
+            document.getElementById('playlists-list').innerHTML = Object.keys(playlists).map(id => {
+                const playlist = playlists[id];
+                const author = playlist.updatedBy || playlist.createdBy || 'Inconnu';
+                const dateStr = playlist.updatedAt ? new Date(playlist.updatedAt).toLocaleString() : 'Date inconnue';
+                
+                const firstItem = (playlist.items && playlist.items.length > 0) ? playlist.items[0] : null;
+                const bgUrl = (firstItem && firstItem.backgroundUrl) ? firstItem.backgroundUrl : playlist.backgroundUrl;
+                const bgColor = (firstItem && firstItem.backgroundColor) ? firstItem.backgroundColor : playlist.backgroundColor;
+                
+                let bgStyle = '';
+                if (bgUrl) {
+                    bgStyle = `background-image: url('${getAuthenticatedUrl(bgUrl)}');`;
+                } else if (bgColor) {
+                    bgStyle = `background-color: ${bgColor};`;
+                } else {
+                    bgStyle = `background-color: #1a252f;`;
+                }
+
+                const thumbnailHtml = getPageThumbnailHtml(playlist, firstItem);
+
+                const canEdit = (userRole === 'admin' || userRole === 'editor' || author === loggedInUsername);
+                const canDelete = (userRole === 'admin' || userRole === 'editor' || author === loggedInUsername);
+
+                return `
+                <div class="playlist-card" onmouseenter="startThumbnailAnimation(this, '${id}')" onmouseleave="stopThumbnailAnimation(this, '${id}')">
+                    <div class="playlist-thumbnail" style="${bgStyle}">
+                        ${thumbnailHtml}
                     </div>
-                </div>`).join('');
+                    <div class="playlist-card-details">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <strong>${playlist.name}</strong>
+                            ${getStatusBadgeHtml(playlist.status)}
+                        </div>
+                        <span class="meta">
+                            👤 Auteur : <span style="color: #3498db; font-weight: bold;">${author}</span> &nbsp;|&nbsp; 
+                            📅 Modifié le : ${dateStr}
+                        </span>
+                    </div>
+                    <div class="playlist-card-overlay">
+                        <button type="button" class="secondary" onclick="event.stopPropagation(); window.open('/player?id=${id}&token=${token}', '_blank')" title="Aperçu du diaporama">👁️</button>
+                        ${canEdit ? `<button type="button" class="secondary" onclick="event.stopPropagation(); window.location.href='/editor?id=${id}'" title="Modifier le diaporama">✏️</button>` : ''}
+                        ${(userRole === 'admin' || userRole === 'editor') && playlist.status === 'pending' ? `
+                            <button type="button" class="secondary" style="background: #2ecc71;" onclick="event.stopPropagation(); window.approvePlaylist('${id}')" title="Valider le diaporama">✅</button>
+                        ` : ''}
+                        ${canDelete ? `<button type="button" class="danger" onclick="event.stopPropagation(); window.deletePlaylist('${id}')" title="Supprimer le diaporama">🗑️</button>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
 
             document.getElementById('schedule-device').innerHTML = Object.keys(players).map(id => `<option value="${id}">${players[id].name}</option>`).join('');
             document.getElementById('schedule-playlist').innerHTML = '<option value="">Choisir...</option>' + 
-                Object.keys(playlists).map(id => `<option value="p:${id}">Diaporama: ${playlists[id].name}</option>`).join('') +
+                Object.keys(playlists).map(id => {
+                    const p = playlists[id];
+                    const statusLabel = p.status && p.status !== 'approved' ? ` (${p.status === 'pending' ? 'En attente' : 'Brouillon'})` : '';
+                    return `<option value="p:${id}">Diaporama: ${p.name}${statusLabel}</option>`;
+                }).join('') +
                 Object.keys(sequences).map(id => `<option value="s:${id}">Séquence: ${sequences[id].name}</option>`).join('');
             
             loadSchedules();
         }
 
-        async function deletePlaylist(id) { if (confirm('Supprimer ?')) { await fetch(`/api/admin/playlists/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); load(); } }
+        async function deletePlaylist(id) {
+            console.log("Appel de deletePlaylist avec l'ID :", id);
+            if (confirm('Supprimer ?')) {
+                try {
+                    const res = await fetch(`/api/admin/playlists/${id}`, { 
+                        method: 'DELETE', 
+                        headers: { 'Authorization': `Bearer ${token}` } 
+                    });
+                    if (res.ok) {
+                        load();
+                    } else {
+                        const errorMsg = await res.text();
+                        alert('Erreur lors de la suppression : ' + errorMsg);
+                    }
+                } catch (err) {
+                    alert('Erreur réseau lors de la suppression : ' + err.message);
+                }
+            }
+        }
+        window.deletePlaylist = deletePlaylist;
+
+        async function approvePlaylist(id) {
+            if (!confirm('Voulez-vous valider et approuver ce diaporama pour diffusion ?')) return;
+            try {
+                const res = await fetch(`/api/admin/playlists/${id}/approve`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    load();
+                } else {
+                    alert('Erreur lors de la validation du diaporama.');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Erreur réseau lors de la validation : ' + err.message);
+            }
+        }
+        window.approvePlaylist = approvePlaylist;
 
         async function loadSchedules() {
-            const res = await fetch('/api/admin/schedules', { headers: { 'Authorization': `Bearer ${token}` } });
-            const schedules = await res.json();
-            document.getElementById('schedules-list').innerHTML = '<table><tr><th>Écran</th><th>Cible</th><th>Début</th><th>Fin</th><th>Action</th></tr>' +
-                schedules.map(s => `<tr>
-                    <td>${s.deviceId}</td>
-                    <td>${s.playlistId || s.sequenceId}</td>
-                    <td>${new Date(s.startTime).toLocaleString()}</td>
-                    <td>${new Date(s.endTime).toLocaleString()}</td>
-                    <td>
-                        <button class="secondary" onclick="editSchedule('${s.id}')">✏️</button>
-                        <button class="danger" onclick="deleteSchedule('${s.id}')">🗑️</button>
-                    </td>
-                </tr>`).join('') + '</table>';
+            try {
+                const res = await fetch('/api/admin/schedules', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) {
+                    const section = document.getElementById('schedules-section');
+                    if (section) section.style.display = 'none';
+                    return;
+                }
+                const schedules = await res.json();
+                document.getElementById('schedules-list').innerHTML = '<table><tr><th>Écran</th><th>Cible</th><th>Début</th><th>Fin</th><th>Action</th></tr>' +
+                    schedules.map(s => `<tr>
+                        <td>${s.deviceId}</td>
+                        <td>${s.playlistId || s.sequenceId}</td>
+                        <td>${new Date(s.startTime).toLocaleString()}</td>
+                        <td>${new Date(s.endTime).toLocaleString()}</td>
+                        <td>
+                            <button class="secondary" onclick="editSchedule('${s.id}')">✏️</button>
+                            <button class="danger" onclick="deleteSchedule('${s.id}')">🗑️</button>
+                        </td>
+                    </tr>`).join('') + '</table>';
+            } catch (e) {
+                console.warn("Impossible de charger le planning des diffusions :", e);
+                const section = document.getElementById('schedules-section');
+                if (section) section.style.display = 'none';
+            }
         }
 
         async function saveSchedule() {
@@ -118,7 +414,7 @@
         async function editSchedule(id) {
             const res = await fetch('/api/admin/schedules', { headers: { 'Authorization': `Bearer ${token}` } });
             const schedules = await res.json();
-            const s = schedules.find(x => x.id === id);
+            const s = schedules.find(x => String(x.id) === String(id));
             if (s) {
                 document.getElementById('schedule-id').value = s.id;
                 document.getElementById('schedule-device').value = s.deviceId;
@@ -134,6 +430,62 @@
             document.getElementById('schedule-playlist').value = '';
             document.getElementById('schedule-start').value = '';
             document.getElementById('schedule-end').value = '';
+        }
+
+        function startThumbnailAnimation(cardEl, playlistId) {
+            console.log("startThumbnailAnimation called for", playlistId, "layoutMode:", layoutMode);
+            if (layoutMode !== 'grid') {
+                console.log("Returned early: layoutMode is not grid");
+                return;
+            }
+            
+            const playlist = globalPlaylists[playlistId];
+            if (!playlist) {
+                console.log("Returned early: playlist not found in globalPlaylists");
+                return;
+            }
+            if (!playlist.items || playlist.items.length <= 1) {
+                console.log("Returned early: playlist items length <= 1");
+                return;
+            }
+            
+            const thumbnailEl = cardEl.querySelector('.playlist-thumbnail');
+            if (!thumbnailEl) {
+                console.log("Returned early: thumbnailEl not found");
+                return;
+            }
+            
+            let itemIdx = 0;
+            const items = playlist.items;
+            console.log("Starting animation interval. Total items to cycle:", items.length);
+            
+            if (activeThumbnailIntervals[playlistId]) {
+                clearInterval(activeThumbnailIntervals[playlistId]);
+            }
+            
+            activeThumbnailIntervals[playlistId] = setInterval(() => {
+                itemIdx = (itemIdx + 1) % items.length;
+                const item = items[itemIdx];
+                renderPageInThumbnail(thumbnailEl, playlist, item);
+            }, 1500);
+        }
+
+        function stopThumbnailAnimation(cardEl, playlistId) {
+            console.log("stopThumbnailAnimation called for", playlistId);
+            if (activeThumbnailIntervals[playlistId]) {
+                clearInterval(activeThumbnailIntervals[playlistId]);
+                delete activeThumbnailIntervals[playlistId];
+                console.log("Cleared animation interval for", playlistId);
+            }
+            
+            const playlist = globalPlaylists[playlistId];
+            if (!playlist) return;
+            
+            const thumbnailEl = cardEl.querySelector('.playlist-thumbnail');
+            if (!thumbnailEl) return;
+            
+            const firstItem = (playlist.items && playlist.items.length > 0) ? playlist.items[0] : null;
+            renderPageInThumbnail(thumbnailEl, playlist, firstItem);
         }
 
         load();

@@ -1,0 +1,1 @@
+const fs=require('fs');const path='c:/Users/ash/Documents/GitHub/PiDyn/server/player.html';const s=fs.readFileSync(path,'utf8');const m=s.match(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/i);const src=m[1];const a=12580,b=12640; console.log('slice',a,'..',b); console.log(src.slice(a,b));

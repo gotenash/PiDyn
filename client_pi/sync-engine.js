@@ -19,9 +19,16 @@ const DEVICE_ID = (process.env.PIDYN_DEVICE_ID && process.env.PIDYN_DEVICE_ID !=
 const LOCAL_MEDIA_DIR = path.join(__dirname, 'media');
 const LOCAL_MANIFEST = path.join(__dirname, 'playlist.json');
 
+let activeAlerts = []; // Stockage local des alertes actives
+
 console.log(`--- Démarrage PiDyn Sync (Node ${process.version}) ---`);
 console.log(`📡 Serveur cible : ${SERVER_URL}`);
 console.log(`🆔 ID Afficheur  : ${DEVICE_ID}`);
+
+if (!DEVICE_ID || DEVICE_ID === 'default-pi-device' || DEVICE_ID === 'undefined') {
+    console.warn('⚠️  Attention : DEVICE_ID n\'est pas configuré ou utilise la valeur par défaut.');
+    console.warn('    Vérifiez votre fichier setup.txt ou vos variables d\'environnement.');
+}
 
 // Initialisation du fichier manifest pour que le player sache qu'il est en attente
 async function ensureInitialManifest() {
@@ -32,7 +39,10 @@ async function ensureInitialManifest() {
             deviceId: DEVICE_ID,
             serverUrl: SERVER_URL,
             items: [],
-            status: 'waiting_approval'
+            status: 'waiting_approval',
+            disableClientLogs: false, // Default value
+            disableDebugLogs: false,  // Default value
+            splashScreenUrl: '/img/splashscreen.png' // Default splash screen
         };
         await fs.writeJson(LOCAL_MANIFEST, initialData);
         console.log("📄 Manifest de sécurité créé.");
@@ -101,6 +111,10 @@ async function syncPlaylist(playlistData) {
     if (playlistData.splashScreenUrl) allUrls.push(playlistData.splashScreenUrl);
     playlistData.items.forEach(item => {
         if (item.backgroundUrl) allUrls.push(item.backgroundUrl);
+        // Ajout du média contenu dans le template vidéo pour le téléchargement et le nettoyage
+        if (item.template === 'video_fullscreen' && item.data && item.data.videoUrl) {
+            allUrls.push(item.data.videoUrl);
+        }
         if (item.zones) item.zones.forEach(z => { 
             if (z.url) allUrls.push(z.url); 
             if (z.fontUrl) allUrls.push(z.fontUrl);
@@ -118,6 +132,14 @@ async function syncPlaylist(playlistData) {
             relativePath = url.substring('/media/'.length);
         } else if (url.startsWith('/img/')) {
             relativePath = 'img/' + url.substring('/img/'.length);
+        } else if (url.startsWith('/api/admin/qrcode')) {
+            let textVal = 'default';
+            try {
+                const urlObj = new URL(url, 'http://localhost');
+                textVal = urlObj.searchParams.get('text') || 'default';
+            } catch (e) {}
+            const cleanText = Buffer.from(textVal).toString('base64url').substring(0, 30);
+            relativePath = `qrcodes/qr_${cleanText}.png`;
         } else {
             relativePath = path.basename(url); // Fallback for other URLs
         }
@@ -165,6 +187,11 @@ async function syncPlaylist(playlistData) {
     for (const item of playlistData.items) {
         if (item.backgroundUrl) item.localBackgroundUrl = await downloadMedia(item.backgroundUrl);
         
+        // Téléchargement de la vidéo du template si présent
+        if (item.template === 'video_fullscreen' && item.data && item.data.videoUrl) {
+            item.data.localVideoUrl = await downloadMedia(item.data.videoUrl);
+        }
+        
         // On synchronise les médias de chaque zone
         if (item.zones) {
             for (const zone of item.zones) {
@@ -200,6 +227,7 @@ async function syncPlaylist(playlistData) {
     playlistData.deviceId = DEVICE_ID;
     playlistData.serverUrl = SERVER_URL;
     playlistData.apiKey = API_KEY;
+    playlistData.activeAlerts = activeAlerts;
 
     // On écrit le fichier que le HTML va lire
     await fs.writeJson(LOCAL_MANIFEST, playlistData);
@@ -212,16 +240,56 @@ socket.on('connect', async () => {
     console.log(`Connecté au CMS en tant que ${DEVICE_ID}`);
     // Envoyer les infos réseau au serveur
     const network = await getNetworkInfo();
+
+    // --- DIAGNOSTIC TECHNIQUE ACCÉLÉRATION MATÉRIELLE ---
+    try {
+        const { stdout: gpuMem } = await execPromise("vcgencmd get_mem gpu || echo 'gpu=unknown'");
+        const isV4L2Present = await fs.pathExists('/dev/video10'); // Périphérique standard du décodeur H264 sur Pi
+        console.log(`[TECH] 🚀 Accélération Matérielle : ${isV4L2Present ? 'DISPONIBLE (V4L2)' : 'INACTIVE'} | ${gpuMem.trim()}`);
+        network.gpu = isV4L2Present ? `Disponible (${gpuMem.trim().split('=')[1] || '?'})` : `Non détectée (${gpuMem.trim().split('=')[1] || '?'})`;
+    } catch (e) {
+        network.gpu = "Erreur vcgencmd";
+    }
+
     const totalMem = Math.round(os.totalmem() / 1024 / 1024);
     const freeMem = Math.round(os.freemem() / 1024 / 1024);
     console.log(`📊 Mémoire système : ${freeMem}MB libres / ${totalMem}MB au total`);
     socket.emit('player-info-update', network);
 });
 
+// --- GESTION DES ALERTES FLASH ---
+socket.on('show-alert', async (alert) => {
+    console.log(`🔔 Alerte reçue : [${alert.type}] ${alert.text}`);
+    // Éviter les doublons
+    if (!activeAlerts.find(a => a.id === alert.id)) {
+        activeAlerts.push(alert);
+        await updateManifestWithAlerts();
+    }
+});
+
+socket.on('clear-alert', async (alertId) => {
+    console.log(`🔕 Suppression de l'alerte ID: ${alertId}`);
+    activeAlerts = activeAlerts.filter(a => a.id != alertId);
+    await updateManifestWithAlerts();
+});
+
+async function updateManifestWithAlerts() {
+    try {
+        if (await fs.pathExists(LOCAL_MANIFEST)) {
+            const manifest = await fs.readJson(LOCAL_MANIFEST);
+            manifest.activeAlerts = activeAlerts;
+            await fs.writeJson(LOCAL_MANIFEST, manifest);
+            // Note: Le player.html doit être programmé pour surveiller les changements ou lire activeAlerts
+        }
+    } catch (err) {
+        console.error("❌ Erreur maj manifest alertes:", err.message);
+    }
+}
+
 // Surveillance périodique de la RAM (toutes les minutes)
 setInterval(() => {
     const free = Math.round(os.freemem() / 1024 / 1024);
-    if (free < 150) {
+    if (free < 50) {
         console.warn(`⚠️ Alerte RAM basse : seulement ${free}MB restants !`);
     }
 }, 60000);
@@ -248,11 +316,22 @@ socket.on('playlist-updated', async (playlistData) => {
 
 // Écouter les commandes de contrôle de l'écran
 socket.on('screen-command', (data) => {
-    const state = data.action === 'on' ? 'on' : 'off';
+    const state = data.action === 'on' ? '1' : '0';
     console.log(`📺 Commande écran reçue : force ${state}`);
-    // On force l'export de DISPLAY pour que xset sache quel écran piloter
-    exec(`export DISPLAY=:0 && xset dpms force ${state}`, (error) => {
-        if (error) console.error(`❌ Erreur lors de l'exécution de xset : ${error.message}`);
+    
+    // 1. Essayer via vcgencmd (pilotes framebuffer legacy)
+    exec(`vcgencmd display_power ${state}`, (error) => {
+        if (error) {
+            console.warn(`⚠️ vcgencmd display_power a échoué (normal sur RPi 4/5 avec pilote KMS) : ${error.message}`);
+        }
+    });
+
+    // 2. Essayer via xset (pour pilote KMS sous X11/Xorg)
+    const xsetState = data.action === 'on' ? 'on' : 'off';
+    exec(`export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority && xset dpms force ${xsetState}`, (error) => {
+        if (error) {
+            console.error(`❌ Erreur lors de l'exécution de xset dpms : ${error.message}`);
+        }
     });
 });
 
@@ -260,7 +339,7 @@ socket.on('screen-command', (data) => {
 socket.on('request-screenshot', () => {
     const screenshotPath = '/tmp/screenshot.jpg';
     console.log(`📸 Prise d'une capture d'écran...`);
-    exec(`export DISPLAY=:0 && scrot ${screenshotPath}`, async (error, stdout, stderr) => {
+    exec(`export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority && scrot ${screenshotPath}`, async (error, stdout, stderr) => {
         if (error) {
             console.error(`❌ Erreur scrot : ${error.message}`);
             if (stderr) console.error(`❌ scrot stderr: ${stderr}`);

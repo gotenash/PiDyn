@@ -103,6 +103,15 @@ async function syncPlaylist(playlistData) {
             relativePath = url.substring('/media/'.length);
         } else if (url.startsWith('/img/')) {
             relativePath = 'img/' + url.substring('/img/'.length);
+        } else if (url.startsWith('/api/admin/qrcode')) {
+            let textVal = 'default';
+            try {
+                const urlObj = new URL(url, 'http://localhost');
+                textVal = urlObj.searchParams.get('text') || 'default';
+            } catch (e) {}
+            // Base64url encode to get a clean safe string (max 30 chars) without restricted chars (?, =, etc)
+            const cleanText = Buffer.from(textVal).toString('base64url').substring(0, 30);
+            relativePath = `qrcodes/qr_${cleanText}.png`;
         } else {
             relativePath = path.basename(url);
         }

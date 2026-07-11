@@ -1,0 +1,1 @@
+const fs=require('fs');const path='c:/Users/ash/Documents/GitHub/PiDyn/server/player.html';const s=fs.readFileSync(path,'utf8');const m=s.match(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/i);const src=m[1];const a=12580,b=12610; for(let i=a;i<b;i++){ const ch=src[i]; const display = ch==='\n'?'\\n':ch; console.log(i, display); }

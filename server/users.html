@@ -28,12 +28,13 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
     <section>
         <h2>Ajouter / Modifier un Utilisateur</h2>
-        <div style="display: flex; gap: 10px; align-items: end;">
+        <div style="display: flex; gap: 10px; align-items: end; flex-wrap: wrap;">
             <div>
                 <label>Nom d'utilisateur</label><br>
                 <input type="text" id="user-name">
@@ -55,6 +56,12 @@
                     <option value="cook">Cuisinier</option>
                 </select>
             </div>
+            <div>
+                <label>Site</label><br>
+                <select id="user-site">
+                    <option value="">Aucun (Global)</option>
+                </select>
+            </div>
             <button onclick="saveUser()">Enregistrer</button>
         </div>
     </section>
@@ -73,23 +80,45 @@
             window.location.href = '/';
         }
 
-        function logout() { localStorage.removeItem('pidyn_token'); localStorage.removeItem('pidyn_role'); window.location.href = '/'; }
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
+
+        async function loadSites() {
+            try {
+                const res = await fetch('/api/admin/sites', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const sites = await res.json();
+                const select = document.getElementById('user-site');
+                select.innerHTML = '<option value="">Aucun (Global)</option>' +
+                    sites.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+            } catch (err) {
+                console.error("Erreur chargement des sites:", err);
+            }
+        }
 
         async function loadUsers() {
-            const res = await fetch('/api/admin/users', { //
+            const res = await fetch('/api/admin/users', { 
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.status === 403) window.location.href = '/';
             const users = await res.json();
 
-            let html = '<table><tr><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Actions</th></tr>';
+            let html = '<table><tr><th>Utilisateur</th><th>Email</th><th>Rôle</th><th>Site</th><th>Actions</th></tr>';
             users.forEach(u => {
+                const siteName = u.siteId || '<em style="color:#bdc3c7">Global</em>';
                 html += `<tr>
                     <td>${u.username}</td>
                     <td>${u.email || '<em style="color:#bdc3c7">Non renseigné</em>'}</td>
                     <td>${u.role}</td>
+                    <td>${siteName}</td>
                     <td> 
-                        <button class="secondary" title="Modifier" onclick="editUser('${u.username}', '${u.role}', '${u.email || ''}')">✏️</button>
+                        <button class="secondary" title="Modifier" onclick="editUser('${u.username}', '${u.role}', '${u.email || ''}', '${u.siteId || ''}')">✏️</button>
                         ${u.username !== 'admin' ? `<button class="danger" title="Supprimer" onclick="deleteUser('${u.username}')">🗑️</button>` : ''}
                     </td>
                 </tr>`;
@@ -97,10 +126,11 @@
             document.getElementById('users-list').innerHTML = html + '</table>';
         }
 
-        function editUser(username, role, email) {
+        function editUser(username, role, email, siteId) {
             document.getElementById('user-name').value = username;
             document.getElementById('user-role').value = role;
             document.getElementById('user-email').value = email;
+            document.getElementById('user-site').value = siteId || '';
             document.getElementById('user-pass').value = ''; 
         }
 
@@ -109,13 +139,14 @@
             const email = document.getElementById('user-email').value;
             const password = document.getElementById('user-pass').value;
             const role = document.getElementById('user-role').value;
+            const siteId = document.getElementById('user-site').value;
 
             if (!username || !password) return alert("Veuillez remplir tous les champs");
 
             const res = await fetch('/api/admin/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ username, email, password, role })
+                body: JSON.stringify({ username, email, password, role, siteId: siteId || null })
             });
 
             if (res.ok) {
@@ -123,6 +154,7 @@
                 document.getElementById('user-name').value = '';
                 document.getElementById('user-email').value = '';
                 document.getElementById('user-pass').value = '';
+                document.getElementById('user-site').value = '';
                 loadUsers();
             } else {
                 alert('Erreur lors de l\'enregistrement');
@@ -132,13 +164,18 @@
         async function deleteUser(username) {
             if (!confirm(`Supprimer l'utilisateur ${username} ?`)) return;
             const res = await fetch(`/api/admin/users/${username}`, {
-                method: 'DELETE', //
+                method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) loadUsers();
         }
 
-        loadUsers();
+        async function init() {
+            await loadSites();
+            await loadUsers();
+        }
+
+        init();
     </script>
 </body>
 </html>

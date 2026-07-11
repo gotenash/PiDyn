@@ -7,12 +7,13 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 const AdmZip = require('adm-zip');
 const mime = require('mime-types');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const util = require('util');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
 const knex = require('knex');
 const sqlite3 = require('sqlite3'); // Required by knex for SQLite
+const QRCode = require('qrcode');
 const execPromise = util.promisify(exec);
 const saltRounds = 10;
 
@@ -56,6 +57,25 @@ let SMTP_PASS = '';
 let NOTIFICATION_EMAIL = '';
 const SQLITE_DB_PATH = path.join(__dirname, 'pidyn.sqlite'); // New SQLite DB path
 const MEDIA_DIR = path.join(__dirname, 'public/media');
+
+const resolveLocalBinary = (filename) => {
+    const isWin = process.platform === 'win32';
+    const cleanName = isWin ? filename : filename.replace('.exe', '');
+    
+    // 1. Check in root server folder
+    const pathRoot = path.join(__dirname, cleanName);
+    if (fs.existsSync(pathRoot)) return `"${pathRoot}"`;
+    
+    // 2. Check in 'bin' subfolder
+    const pathBin = path.join(__dirname, 'bin', cleanName);
+    if (fs.existsSync(pathBin)) return `"${pathBin}"`;
+    
+    // 3. Check in 'app' subfolder
+    const pathApp = path.join(__dirname, 'app', cleanName);
+    if (fs.existsSync(pathApp)) return `"${pathApp}"`;
+    
+    return cleanName; // Fallback to global command
+};
 
 // Initialize Knex
 const db = knex({
@@ -130,6 +150,24 @@ async function initializeDatabase() {
             });
             console.log('Table "playlists" created.');
         }
+
+        // Migration : Ajout des colonnes de suivi si absentes
+        const columnsToAdd = ['createdBy', 'updatedBy', 'createdAt', 'updatedAt', 'status'];
+        for (const col of columnsToAdd) {
+            const hasCol = await db.schema.hasColumn('playlists', col);
+            if (!hasCol) {
+                await db.schema.table('playlists', (table) => {
+                    if (col === 'createdBy' || col === 'updatedBy') {
+                        table.string(col);
+                    } else if (col === 'status') {
+                        table.string(col).defaultTo('approved');
+                    } else {
+                        table.timestamp(col);
+                    }
+                });
+                console.log(`Colonne de suivi/statut "${col}" ajoutée à la table "playlists".`);
+            }
+        }
     });
 
     await db.schema.hasTable('players').then(async (exists) => {
@@ -180,8 +218,20 @@ async function initializeDatabase() {
                 table.string('uploadedBy').notNullable();
                 table.timestamp('uploadDate').notNullable();
                 table.string('parentZipDir');
+                table.string('parentFolderId');
+                table.string('parentFolderName');
             });
             console.log('Table "media" created.');
+        }
+
+        // Migration : Ajout des colonnes parentFolderId et parentFolderName si absentes
+        const hasParentFolderId = await db.schema.hasColumn('media', 'parentFolderId');
+        if (!hasParentFolderId) {
+            await db.schema.table('media', (table) => {
+                table.string('parentFolderId');
+                table.string('parentFolderName');
+            });
+            console.log('Colonnes "parentFolderId" et "parentFolderName" ajoutées à la table "media".');
         }
     });
 
@@ -302,6 +352,30 @@ async function initializeDatabase() {
             console.log('Table "canteen_menus" créée.');
         }
     });
+
+    // Table sites
+    await db.schema.hasTable('sites').then(async (exists) => {
+        if (!exists) {
+            await db.schema.createTable('sites', (table) => {
+                table.string('id').primary();
+                table.string('name').unique().notNullable();
+                table.string('description');
+            });
+            console.log('Table "sites" créée.');
+        }
+    });
+
+    // Ajouter siteId aux tables
+    const tablesToMigrate = ['users', 'playlists', 'media', 'sequences', 'players', 'groups'];
+    for (const tableName of tablesToMigrate) {
+        const hasSiteId = await db.schema.hasColumn(tableName, 'siteId');
+        if (!hasSiteId) {
+            await db.schema.table(tableName, (table) => {
+                table.string('siteId').nullable();
+            });
+            console.log(`Colonne "siteId" ajoutée à la table "${tableName}".`);
+        }
+    }
 }
 
 // Load settings from DB
@@ -424,22 +498,27 @@ const checkSchedules = async (targetDeviceId = null, forceEmit = false) => {
             const targetPlaylist = await db('playlists').where({ id: newPlaylistId }).first();
 
             if (targetPlaylist) {
-                targetPlaylist.items = JSON.parse(targetPlaylist.items);
-                const playlistToSend = { ...targetPlaylist };
-                playlistToSend.apiKey = API_KEY;
-                playlistToSend.disableClientLogs = DISABLE_CLIENT_LOGS;
-                playlistToSend.disableDebugLogs = DISABLE_DEBUG_LOGS;
-                playlistToSend.splashScreenUrl = SPLASH_SCREEN_URL;
-                if (player.currentSequenceId) {
-                    const seq = await db('sequences').where({ id: player.currentSequenceId }).first();
-                    playlistToSend.sequenceContext = {
-                        sequenceId: player.currentSequenceId,
-                        currentPlaylistIndex: player.currentSequenceIndex,
-                        playlistIds: JSON.parse(seq.playlistIds)
-                    };
+                if (targetPlaylist.status && targetPlaylist.status !== 'approved') {
+                    console.warn(`[WARNING] Tentative de diffusion du diaporama non validé "${targetPlaylist.name}" (Statut: ${targetPlaylist.status}) sur l'écran ${deviceId}. Remplacement par une playlist vide.`);
+                    io.to(deviceId).emit('playlist-updated', { name: 'Diaporama non validé', items: [] });
+                } else {
+                    targetPlaylist.items = JSON.parse(targetPlaylist.items);
+                    const playlistToSend = { ...targetPlaylist };
+                    playlistToSend.apiKey = API_KEY;
+                    playlistToSend.disableClientLogs = DISABLE_CLIENT_LOGS;
+                    playlistToSend.disableDebugLogs = DISABLE_DEBUG_LOGS;
+                    playlistToSend.splashScreenUrl = SPLASH_SCREEN_URL;
+                    if (player.currentSequenceId) {
+                        const seq = await db('sequences').where({ id: player.currentSequenceId }).first();
+                        playlistToSend.sequenceContext = {
+                            sequenceId: player.currentSequenceId,
+                            currentPlaylistIndex: player.currentSequenceIndex,
+                            playlistIds: JSON.parse(seq.playlistIds)
+                        };
+                    }
+                    io.to(deviceId).emit('playlist-updated', playlistToSend);
+                    console.log(`Player ${deviceId} switched to playlist: ${targetPlaylist.name}`);
                 }
-                io.to(deviceId).emit('playlist-updated', playlistToSend);
-                console.log(`Player ${deviceId} switched to playlist: ${targetPlaylist.name}`);
             } else {
                 io.to(deviceId).emit('playlist-updated', { name: 'No Playlist', items: [] }); // Envoyer une playlist vide
             }
@@ -447,29 +526,48 @@ const checkSchedules = async (targetDeviceId = null, forceEmit = false) => {
     }
 };
 
+function filterBySiteId(query, user, siteIdColumn = 'siteId') {
+    if (user.role === 'admin' && !user.siteId) {
+        return query;
+    }
+    if (user.siteId) {
+        return query.where(siteIdColumn, user.siteId);
+    }
+    return query.where(siteIdColumn, '__NO_ACCESS__');
+}
+
 // Middleware de sécurité
 const authMiddleware = (req, res, next) => {
     const apiKey = req.headers['x-api-key'] || req.query.apiKey;
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+    const headerToken = authHeader && authHeader.split(' ')[1]; // Format: Bearer <token>
+    const queryToken = req.query.token; // Check for token in query parameter
 
     // Authentification pour les clients Pi (API Key)
     if (apiKey === API_KEY) { // Check against the loaded API_KEY
-        req.user = { role: 'admin' }; // Les écrans (Pi) sont authentifiés via clef
+        req.user = { role: 'player' }; // Les écrans (Pi) sont authentifiés via clef
         return next();
     }
 
     if (req.path === '/api/player/log') {
         console.log(`[AUTH] Rejet log stats de ${req.ip}. Clé reçue: "${apiKey}", Attendue: "${API_KEY}"`);
+        // If it's a player log, and API key is wrong, reject.
+        return res.status(403).send('Accès refusé. Clé API invalide.');
     }
 
     // Authentification pour les utilisateurs admin (JWT)
-    if (token) {
+    let jwtToVerify = headerToken;
+    if (!jwtToVerify && queryToken) { // If no token in header, check query parameter
+        jwtToVerify = queryToken;
+    }
+
+    if (jwtToVerify) {
         try {
-            const decoded = jwt.verify(token, JWT_SECRET); // Check against the loaded JWT_SECRET
+            const decoded = jwt.verify(jwtToVerify, JWT_SECRET); // Check against the loaded JWT_SECRET
             req.user = decoded; // Le payload du JWT contient { username, role }
             return next();
         } catch (err) {
+            console.warn(`[AUTH] JWT verification failed for ${req.ip} (token in ${headerToken ? 'header' : 'query'}): ${err.message}`);
             return res.status(401).send('Token invalide ou expiré');
         }
     }
@@ -515,14 +613,19 @@ app.get('/editor', (req, res) => {
     res.sendFile(path.join(__dirname, 'editor.html'));
 });
 
-// Route pour le lecteur (utilisée aussi pour la prévisualisation)
-app.get('/player', (req, res) => {
-    res.sendFile(path.join(__dirname, 'player.html'));
+// Route pour le lecteur (gère à la fois /player et /preview-player.html)
+app.get(['/player', '/preview-player.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'preview-player.html'));
 });
 
 // Route pour la page de gestion des utilisateurs
 app.get('/users', (req, res) => {
     res.sendFile(path.join(__dirname, 'users.html'));
+});
+
+// Route pour la page de gestion des sites
+app.get('/sites', (req, res) => {
+    res.sendFile(path.join(__dirname, 'sites.html'));
 });
 
 // Route pour la page de gestion de la médiathèque
@@ -549,8 +652,8 @@ app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     const user = await db('users').where({ username }).first();
     if (user && await bcrypt.compare(password, user.password)) {
-        const token = jwt.sign({ username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token: token, role: user.role });
+        const token = jwt.sign({ username: user.username, role: user.role, siteId: user.siteId }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ token: token, role: user.role, username: user.username, siteId: user.siteId });
     } else {
         res.status(401).send('Identifiants incorrects');
     }
@@ -558,15 +661,21 @@ app.post('/api/login', async (req, res) => {
 
 // API Admin : Lister les players et affecter des playlists
 app.get('/api/admin/data', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook']), (req, res) => {
-    // Fetch all data from DB
+    const playersQuery = filterBySiteId(db('players').select('*'), req.user);
+    const playlistsQuery = filterBySiteId(db('playlists').select('*'), req.user);
+    const sequencesQuery = filterBySiteId(db('sequences').select('*'), req.user);
+    const groupsQuery = filterBySiteId(db('groups').select('*'), req.user);
+
     Promise.all([
-        db('players').select('*'),
-        db('playlists').select('*').then(rows => rows.reduce((acc, p) => ({ ...acc, [p.id]: { ...p, items: JSON.parse(p.items) } }), {})),
-        db('sequences').select('*').then(rows => rows.reduce((acc, s) => ({ ...acc, [s.id]: { ...s, playlistIds: JSON.parse(s.playlistIds) } }), {})),
+        playersQuery,
+        playlistsQuery.then(rows => rows.reduce((acc, p) => ({ ...acc, [p.id]: { ...p, items: JSON.parse(p.items) } }), {})),
+        sequencesQuery.then(rows => rows.reduce((acc, s) => ({ ...acc, [s.id]: { ...s, playlistIds: JSON.parse(s.playlistIds) } }), {})),
         db('settings').select('*'),
-        db('groups').select('*')
+        groupsQuery
     ]).then(([players, playlists, sequences, settings, groups]) => {
-        const formattedPlayers = players.reduce((acc, p) => ({ ...acc, [p.id]: { ...p, downloadStatus: JSON.parse(p.downloadStatus || '{}') } }), {});
+        const formattedPlayers = players
+            .filter(p => p.id && p.id !== 'undefined' && p.id !== 'null')
+            .reduce((acc, p) => ({ ...acc, [p.id]: { ...p, downloadStatus: JSON.parse(p.downloadStatus || '{}') } }), {});
         const formattedSettings = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
 
         const responseData = {
@@ -591,7 +700,9 @@ app.get('/api/admin/data', authMiddleware, checkRole(['admin', 'editor', 'author
 
 // API Admin : Lister les médias
 app.get('/api/admin/media', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
-    db('media').select('*').then(media => res.json(media)).catch(err => res.status(500).send('Error fetching media'));
+    filterBySiteId(db('media').select('*'), req.user)
+        .then(media => res.json(media))
+        .catch(err => res.status(500).send('Error fetching media'));
 });
 
 // API Player : Enregistrement des logs de diffusion
@@ -608,27 +719,31 @@ app.post('/api/player/log', authMiddleware, (req, res) => {
 
 // API Admin : Statistiques de diffusion
 app.get('/api/admin/analytics', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
-    db('analytics')
-        .select('itemUrl')
-        .count('id as count')
-        .sum('duration as totalDuration')
-        .groupBy('itemUrl')
+    let query = db('analytics')
+        .join('players', 'analytics.deviceId', '=', 'players.id')
+        .select('analytics.itemUrl')
+        .count('analytics.id as count')
+        .sum('analytics.duration as totalDuration')
+        .groupBy('analytics.itemUrl')
         .orderBy('count', 'desc')
-        .limit(50)
+        .limit(50);
+
+    filterBySiteId(query, req.user, 'players.siteId')
         .then(stats => res.json(stats))
         .catch(err => res.status(500).send(err.message));
 });
 
 app.get('/api/admin/analytics/hourly', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
-    // Récupérer les stats groupées par heure pour les dernières 24 heures
-    db('analytics')
-        .select(db.raw("strftime('%H', timestamp, 'localtime') as hour")) // Utiliser l'heure locale
-        .count('id as count')
-        .where('timestamp', '>', db.raw("datetime('now', '-24 hours')"))
+    let query = db('analytics')
+        .join('players', 'analytics.deviceId', '=', 'players.id')
+        .select(db.raw("strftime('%H', analytics.timestamp, 'localtime') as hour"))
+        .count('analytics.id as count')
+        .where('analytics.timestamp', '>', db.raw("datetime('now', '-24 hours')"))
         .groupBy('hour')
-        .orderBy('hour', 'asc')
+        .orderBy('hour', 'asc');
+
+    filterBySiteId(query, req.user, 'players.siteId')
         .then(stats => {
-            // On remplit les heures vides pour avoir un graphique complet (00h à 23h)
             const hourlyData = Array.from({ length: 24 }, (_, i) => {
                 const hourStr = i.toString().padStart(2, '0');
                 const stat = stats.find(s => s.hour === hourStr);
@@ -675,14 +790,16 @@ app.delete('/api/admin/alerts/:id', authMiddleware, checkRole(['admin', 'editor'
 
 // API Admin : Gestion des Groupes
 app.get('/api/admin/groups', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
-    db('groups').select('*').then(groups => res.json(groups)).catch(err => res.status(500).send(err.message));
+    filterBySiteId(db('groups').select('*'), req.user)
+        .then(groups => res.json(groups))
+        .catch(err => res.status(500).send(err.message));
 });
 
 app.post('/api/admin/groups', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
     const { id, name, description } = req.body;
     if (!name) return res.status(400).send('Nom manquant');
     const groupId = id || `grp_${Date.now()}`;
-    db('groups').insert({ id: groupId, name, description }).onConflict('id').merge()
+    db('groups').insert({ id: groupId, name, description, siteId: req.user.siteId }).onConflict('id').merge()
         .then(() => res.json({ success: true, groupId }))
         .catch(err => res.status(500).send(err.message));
 });
@@ -739,41 +856,172 @@ app.post('/api/admin/groups/:groupId/screenshot', authMiddleware, checkRole(['ad
 
 // API Admin : Gestion des Séquences
 app.get('/api/admin/sequences', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
-    db('sequences').select('*').then(sequences => {
-        const formattedSequences = sequences.reduce((acc, s) => ({ ...acc, [s.id]: { ...s, playlistIds: JSON.parse(s.playlistIds) } }), {});
-        res.json(formattedSequences);
-    }).catch(err => res.status(500).send('Error fetching sequences'));
+    filterBySiteId(db('sequences').select('*'), req.user)
+        .then(sequences => {
+            const formattedSequences = sequences.reduce((acc, s) => ({ ...acc, [s.id]: { ...s, playlistIds: JSON.parse(s.playlistIds) } }), {});
+            res.json(formattedSequences);
+        }).catch(err => res.status(500).send('Error fetching sequences'));
 });
 
 app.post('/api/admin/sequences', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
     const { id, name, playlistIds } = req.body;
     if (!name || !playlistIds) return res.status(400).send('Données manquantes');
     const sequenceId = id || `seq_${Date.now()}`;
-    db('sequences').insert({ id: sequenceId, name, playlistIds: JSON.stringify(playlistIds) })
+    db('sequences').insert({ id: sequenceId, name, playlistIds: JSON.stringify(playlistIds), siteId: req.user.siteId })
         .then(() => res.json({ success: true, sequenceId }))
         .catch(err => res.status(500).send('Error creating sequence: ' + err.message));
 });
 
 app.delete('/api/admin/sequences/:id', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
     const { id } = req.params;
-    db('sequences').where({ id }).del()
-        .then(async (count) => {
-            if (count > 0) {
-                // Clean up player assignments
-                await db('players').where({ manualSequenceId: id }).update({ manualSequenceId: null });
-                res.json({ success: true });
-            } else {
-                res.status(404).send('Séquence non trouvée');
+    db('sequences').where({ id }).first()
+        .then(async (existingSequence) => {
+            if (!existingSequence) return res.status(404).send('Séquence non trouvée');
+
+            // Vérifier les droits
+            if (req.user.siteId && existingSequence.siteId !== req.user.siteId) {
+                return res.status(403).send("Vous n'êtes pas autorisé à supprimer une séquence d'un autre site.");
             }
+
+            await db('sequences').where({ id }).del();
+            // Clean up player assignments
+            await db('players').where({ manualSequenceId: id }).update({ manualSequenceId: null });
+            await db('players').where({ currentSequenceId: id }).update({ currentSequenceId: null, currentSequenceIndex: null });
+            await db('schedules').where({ sequenceId: id }).del();
+            res.json({ success: true });
         })
         .catch(err => res.status(500).send('Error deleting sequence: ' + err.message));
 });
 
-app.delete('/api/admin/media/:id', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+// Helper pour vérifier si des médias sont utilisés dans les playlists (fond global, fond de slide, zones de slide)
+async function getMediaUsagePlaylists(mediaUrls) {
+    try {
+        const playlists = await db('playlists').select('name', 'items', 'backgroundUrl');
+        const usedInPlaylists = new Set();
+        
+        for (const p of playlists) {
+            if (p.backgroundUrl && mediaUrls.includes(p.backgroundUrl)) {
+                usedInPlaylists.add(p.name);
+                continue;
+            }
+            
+            let items = [];
+            try {
+                items = JSON.parse(p.items || '[]');
+            } catch (e) {
+                console.error("Erreur parsing items de la playlist :", e);
+            }
+            
+            let found = false;
+            for (const item of items) {
+                if (item.backgroundUrl && mediaUrls.includes(item.backgroundUrl)) {
+                    usedInPlaylists.add(p.name);
+                    found = true;
+                    break;
+                }
+                if (item.zones && Array.isArray(item.zones)) {
+                    for (const zone of item.zones) {
+                        if (zone.url && mediaUrls.includes(zone.url)) {
+                            usedInPlaylists.add(p.name);
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (found) break;
+            }
+        }
+        
+        return Array.from(usedInPlaylists);
+    } catch (err) {
+        console.error("Erreur dans getMediaUsagePlaylists:", err);
+        return [];
+    }
+}
+
+app.delete('/api/admin/media/folder/:folderId', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
+    const { folderId } = req.params;
+    const force = req.query.force === 'true';
+
+    db('media').where({ parentFolderId: folderId })
+        .then(async (items) => {
+            if (items.length === 0) return res.status(404).send('Dossier non trouvé ou vide');
+
+            // Vérifier les droits
+            for (const item of items) {
+                if (req.user.role === 'author' && item.uploadedBy !== req.user.username) {
+                    return res.status(403).send("Vous n'êtes pas autorisé à supprimer ce dossier car certains médias ne vous appartiennent pas.");
+                }
+                if (req.user.siteId && item.siteId !== req.user.siteId) {
+                    return res.status(403).send("Vous n'êtes pas autorisé à supprimer ce dossier car il appartient à un autre site.");
+                }
+            }
+            
+            if (!force) {
+                const urls = items.map(item => item.url);
+                const usedIn = await getMediaUsagePlaylists(urls);
+                if (usedIn.length > 0) {
+                    return res.status(409).json({
+                        error: 'in_use',
+                        playlists: usedIn,
+                        message: `Ce dossier contient des images utilisées dans les diaporamas suivants : ${usedIn.join(', ')}.`
+                    });
+                }
+            }
+
+            // Supprimer les fichiers physiques sur le disque
+            for (const item of items) {
+                const relativePath = item.url.replace('/media/', '');
+                const filePath = path.join(MEDIA_DIR, relativePath);
+                try {
+                    if (fs.existsSync(filePath)) await fs.unlink(filePath);
+                } catch (e) {
+                    console.error("Erreur lors de la suppression du fichier physique:", e);
+                }
+            }
+
+            // Supprimer le dossier physique s'il est vide/existe
+            try {
+                const folderPath = path.join(MEDIA_DIR, folderId);
+                if (fs.existsSync(folderPath)) {
+                    await fs.remove(folderPath);
+                }
+            } catch (e) {
+                console.error("Erreur lors de la suppression du dossier physique:", e);
+            }
+
+            await db('media').where({ parentFolderId: folderId }).del();
+            res.json({ success: true });
+        })
+        .catch(err => res.status(500).send('Error deleting folder: ' + err.message));
+});
+
+app.delete('/api/admin/media/:id', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
     const { id } = req.params; // media ID
+    const force = req.query.force === 'true';
+
     db('media').where({ id }).first()
         .then(async (item) => {
             if (!item) return res.status(404).send('Média non trouvé');
+
+            // Vérifier les droits
+            if (req.user.role === 'author' && item.uploadedBy !== req.user.username) {
+                return res.status(403).send("Vous n'êtes pas autorisé à supprimer ce média car il ne vous appartient pas.");
+            }
+            if (req.user.siteId && item.siteId !== req.user.siteId) {
+                return res.status(403).send("Vous n'êtes pas autorisé à supprimer ce média d'un autre site.");
+            }
+
+            if (!force) {
+                const usedIn = await getMediaUsagePlaylists([item.url]);
+                if (usedIn.length > 0) {
+                    return res.status(409).json({
+                        error: 'in_use',
+                        playlists: usedIn,
+                        message: `Ce média est utilisé dans les diaporamas suivants : ${usedIn.join(', ')}.`
+                    });
+                }
+            }
 
             const relativePath = item.url.replace('/media/', '');
             const filePath = path.join(MEDIA_DIR, relativePath);
@@ -792,12 +1040,18 @@ app.delete('/api/admin/media/:id', authMiddleware, checkRole(['admin', 'editor']
 
 // API Admin : Gestion des utilisateurs
 app.get('/api/admin/users', authMiddleware, checkRole(['admin']), (req, res) => {
-    db('users').select('id', 'username', 'role', 'email').then(users => res.json(users)).catch(err => res.status(500).send('Error fetching users'));
+    db('users').select('id', 'username', 'role', 'email', 'siteId').then(users => res.json(users)).catch(err => res.status(500).send('Error fetching users'));
 });
 
 // API Admin : Gestion des agendas
 app.get('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
-    db('schedules').select('*').then(schedules => res.json(schedules)).catch(err => res.status(500).send('Error fetching schedules'));
+    let query = db('schedules')
+        .join('players', 'schedules.deviceId', '=', 'players.id')
+        .select('schedules.*');
+
+    filterBySiteId(query, req.user, 'players.siteId')
+        .then(schedules => res.json(schedules))
+        .catch(err => res.status(500).send('Error fetching schedules: ' + err.message));
 });
 
 app.post('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
@@ -836,15 +1090,16 @@ app.delete('/api/admin/schedules/:id', authMiddleware, checkRole(['admin', 'edit
 });
 
 app.post('/api/admin/users', authMiddleware, checkRole(['admin']), async (req, res) => {
-    const { username, password, role, email } = req.body;
+    const { username, password, role, email, siteId } = req.body;
     if (!username || !password || !role) return res.status(400).send('Données manquantes');
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     db('users').where({ username }).first()
         .then(async (existingUser) => {
+            const userData = { password: hashedPassword, role, email, siteId: siteId || null };
             if (existingUser) {
-                await db('users').where({ username }).update({ password: hashedPassword, role, email });
+                await db('users').where({ username }).update(userData);
             } else {
-                await db('users').insert({ username, password: hashedPassword, role, email });
+                await db('users').insert({ username, ...userData });
             }
             res.json({ success: true });
         })
@@ -865,9 +1120,52 @@ app.delete('/api/admin/users/:username', authMiddleware, checkRole(['admin']), (
         .catch(err => res.status(500).send('Error deleting user: ' + err.message));
 });
 
+// API Admin : Gestion des sites
+app.get('/api/admin/sites', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    db('sites').select('*')
+        .then(sites => res.json(sites))
+        .catch(err => res.status(500).send('Error fetching sites: ' + err.message));
+});
+
+app.post('/api/admin/sites', authMiddleware, checkRole(['admin']), (req, res) => {
+    const { id, name, description } = req.body;
+    if (!name) return res.status(400).send('Le nom du site est obligatoire.');
+
+    const siteId = id || `site_${Date.now()}`;
+    const siteData = { id: siteId, name, description: description || '' };
+
+    db('sites').where({ id: siteId }).first()
+        .then(async (existingSite) => {
+            if (existingSite) {
+                await db('sites').where({ id: siteId }).update(siteData);
+            } else {
+                await db('sites').insert(siteData);
+            }
+            res.json({ success: true, siteId });
+        })
+        .catch(err => res.status(500).send('Error saving site: ' + err.message));
+});
+
+app.delete('/api/admin/sites/:id', authMiddleware, checkRole(['admin']), async (req, res) => {
+    const { id } = req.params;
+    try {
+        const usersCount = await db('users').where({ siteId: id }).count('id as count').first();
+        const playersCount = await db('players').where({ siteId: id }).count('id as count').first();
+        if (usersCount.count > 0 || playersCount.count > 0) {
+            return res.status(400).send("Impossible de supprimer ce site car il contient encore des utilisateurs ou des écrans.");
+        }
+
+        await db('sites').where({ id }).del();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).send('Error deleting site: ' + err.message);
+    }
+});
+
 app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'author']), upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).send('Aucun fichier uploadé.');
 
+    req.file.originalname = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
     const originalFilename = req.file.originalname;
     const uploadedFilePath = req.file.path;
     const uploadedFileMimetype = req.file.mimetype;
@@ -910,7 +1208,8 @@ app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'aut
                         type: getFileType(extractedMimeType, entryFilename),
                         uploadedBy: req.user.username,
                         uploadDate: new Date().toISOString(),
-                        parentZipDir: zipExtractDirName // Link to the original zip extraction directory
+                        parentZipDir: zipExtractDirName, // Link to the original zip extraction directory
+                        siteId: req.user.siteId
                     };
                     await db('media').insert(mediaItem);
                     extractedFiles.push(mediaItem);
@@ -934,7 +1233,8 @@ app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'aut
             url: `/media/${uploadedFileName}`,
             type: getFileType(uploadedFileMimetype, originalFilename),
             uploadedBy: req.user.username,
-            uploadDate: new Date().toISOString()
+            uploadDate: new Date().toISOString(),
+            siteId: req.user.siteId
         };
 
     await db('media').insert(mediaItem);
@@ -942,26 +1242,156 @@ app.post('/api/admin/upload', authMiddleware, checkRole(['admin', 'editor', 'aut
     }
 });
 
+app.post('/api/admin/media/youtube', authMiddleware, checkRole(['admin', 'editor', 'author']), async (req, res) => {
+    const { youtubeUrl } = req.body;
+    if (!youtubeUrl) return res.status(400).json({ message: 'URL YouTube manquante' });
+
+    const ytDlpCmd = resolveLocalBinary('yt-dlp.exe');
+    const ffmpegCmd = resolveLocalBinary('ffmpeg.exe');
+
+    // Vérification rapide de la présence des utilitaires système
+    try {
+        await execPromise(`${ytDlpCmd} --version`);
+        await execPromise(`${ffmpegCmd} -version`);
+    } catch (e) {
+        return res.status(500).json({ message: `Utilitaires système manquants (yt-dlp ou ffmpeg).` });
+    }
+
+    // Répondre immédiatement au client
+    res.json({ success: true, message: 'Téléchargement démarré en tâche de fond.' });
+
+    // Lancer le téléchargement en tâche de fond
+    (async () => {
+        try {
+            console.log(`📥 [YouTube BG] Récupération du titre : ${youtubeUrl}`);
+            const cookiesPath = path.join(__dirname, 'cookies.txt');
+            const cookiesCmdArg = fs.existsSync(cookiesPath) ? ` --cookies "${cookiesPath}"` : '';
+
+            const { stdout: titleBuffer } = await execPromise(`${ytDlpCmd} --encoding utf-8${cookiesCmdArg} --get-title "${youtubeUrl}"`, { 
+                encoding: 'buffer',
+                env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+            });
+            const title = titleBuffer.toString('utf8');
+            const cleanTitle = title.trim().replace(/[/\\?%*:|"<>]/g, '-');
+            const safeFilename = `yt_${Date.now()}_${cleanTitle}.mp4`;
+            const outputPath = path.join(MEDIA_DIR, safeFilename);
+
+            console.log(`📥 [YouTube BG] Début du téléchargement : ${youtubeUrl}`);
+            const downloadArgs = [
+                '-f', 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '--recode-video', 'mp4',
+                '--postprocessor-args', 'ffmpeg:-c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v 2000k -maxrate 2000k -bufsize 4000k -c:a aac -movflags +faststart',
+                '-o', outputPath,
+                youtubeUrl,
+                '--newline',
+                '--progress'
+            ];
+            if (fs.existsSync(cookiesPath)) {
+                downloadArgs.unshift('--cookies', cookiesPath);
+            }
+            const executable = ytDlpCmd.replace(/"/g, '');
+            const downloadProcess = spawn(executable, downloadArgs, {
+                env: { ...process.env, PYTHONUNBUFFERED: "1" }
+            });
+
+            await new Promise((resolve, reject) => {
+                downloadProcess.stdout.on('data', (data) => {
+                    const output = data.toString();
+                    const lines = output.split(/[\r\n]+/);
+                    // Parcourir de la fin vers le début pour émettre le pourcentage le plus récent
+                    for (let i = lines.length - 1; i >= 0; i--) {
+                        const match = lines[i].match(/(\d+(?:\.\d+)?)%/);
+                        if (match) {
+                            io.emit('youtube-download-progress', { url: youtubeUrl, progress: match[1] });
+                            break; 
+                        }
+                    }
+                });
+                downloadProcess.on('close', (code) => {
+                    if (code === 0) resolve();
+                    else reject(new Error(`Le téléchargement a échoué avec le code ${code}`));
+                });
+                downloadProcess.on('error', reject);
+            });
+
+            // Enregistrer l'entrée dans la base de données
+            const mediaItem = {
+                id: `m_yt_${Date.now()}`,
+                filename: `${title.trim()}.mp4`,
+                url: `/media/${safeFilename}`,
+                type: 'video',
+                uploadedBy: req.user.username,
+                uploadDate: new Date().toISOString(),
+                siteId: req.user.siteId
+            };
+
+            await db('media').insert(mediaItem);
+            console.log(`✅ [YouTube BG] Vidéo importée avec succès : ${mediaItem.filename}`);
+            io.emit('youtube-download-complete', mediaItem);
+        } catch (error) {
+            console.error("❌ [YouTube BG] Erreur lors du téléchargement :", error.message);
+            io.emit('youtube-download-error', { url: youtubeUrl, message: error.message });
+        }
+    })();
+});
+
 // Route pour l'import PPTX (Structure suggérée)
-app.post('/api/admin/import-pptx', authMiddleware, checkRole(['admin', 'editor']), upload.single('file'), async (req, res) => {
+app.post('/api/admin/import-pptx', authMiddleware, checkRole(['admin', 'editor', 'author']), upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).send('Aucun fichier PPTX.');
 
+    req.file.originalname = Buffer.from(req.file.originalname, 'latin1').toString('utf8');
     try {
         const fileBaseName = path.parse(req.file.filename).name;
         const subFolderName = `pptx_${Date.now()}`;
         const outputDir = path.join(MEDIA_DIR, subFolderName);
         await fs.ensureDir(outputDir);
 
+        // Détection et résolution des chemins de soffice (LibreOffice) et pdftocairo
+        let sofficeCmd = 'soffice';
+        if (process.platform === 'win32') {
+            const defaultPaths = [
+                'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
+                'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe'
+            ];
+            for (const p of defaultPaths) {
+                if (await fs.pathExists(p)) {
+                    sofficeCmd = `"${p}"`;
+                    break;
+                }
+            }
+            // Si pas trouvé dans les dossiers par défaut, on cherche aussi dans les sous-dossiers locaux 'app' ou 'bin'
+            if (sofficeCmd === 'soffice') {
+                const localSoffice = resolveLocalBinary('soffice.exe');
+                if (localSoffice !== 'soffice') {
+                    sofficeCmd = localSoffice;
+                }
+            }
+        }
+
+        const pdftocairoCmd = resolveLocalBinary('pdftocairo.exe');
+
         // 1. Conversion PPTX -> PDF via LibreOffice
-        await execPromise(`soffice --headless --convert-to pdf --outdir "${outputDir}" "${req.file.path}"`);
+        await execPromise(`${sofficeCmd} --headless --convert-to pdf --outdir "${outputDir}" "${req.file.path}"`);
         
         const pdfPath = path.join(outputDir, `${fileBaseName}.pdf`);
-        if (!await fs.pathExists(pdfPath)) {
-            throw new Error("La conversion PDF a échoué. Vérifiez que LibreOffice est installé.");
+        
+        // Attente de la création effective du fichier PDF (max 15 secondes)
+        let fileCreated = false;
+        for (let i = 0; i < 30; i++) {
+            if (await fs.pathExists(pdfPath)) {
+                fileCreated = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 500));
+        }
+        
+        if (!fileCreated) {
+            throw new Error(`La conversion PDF a échoué. Vérifiez que LibreOffice est installé. Commande tentée : ${sofficeCmd}`);
         }
 
         // 2. Conversion PDF -> PNG (un par slide) via pdftocairo
-        await execPromise(`pdftocairo -png "${pdfPath}" "${outputDir}/slide"`);
+        const slidePrefix = path.join(outputDir, 'slide');
+        await execPromise(`${pdftocairoCmd} -png "${pdfPath}" "${slidePrefix}"`);
 
         // 3. Nettoyage (suppression du PDF temporaire et du PPTX uploadé)
         await fs.remove(pdfPath);
@@ -983,10 +1413,13 @@ app.post('/api/admin/import-pptx', authMiddleware, checkRole(['admin', 'editor']
                 url: relativeUrl,
                 type: 'image',
                 uploadedBy: req.user.username,
-                uploadDate: new Date().toISOString()
+                uploadDate: new Date().toISOString(),
+                parentFolderId: subFolderName,
+                parentFolderName: req.file.originalname,
+                siteId: req.user.siteId
             };
             await db('media').insert(mediaItem);
-            return { type: 'image', url: relativeUrl, duration: 10000 };
+            return { duration: 10000, backgroundColor: '#000000', backgroundUrl: relativeUrl, zones: [] };
         }));
 
         const playlistData = {
@@ -994,11 +1427,16 @@ app.post('/api/admin/import-pptx', authMiddleware, checkRole(['admin', 'editor']
             name: `Import: ${req.file.originalname}`,
             items: JSON.stringify(playlistItems),
             backgroundColor: "#ffffff",
-            resolution: "16/9"
+            resolution: "16/9",
+            createdBy: req.user.username,
+            updatedBy: req.user.username,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            siteId: req.user.siteId
         };
 
         await db('playlists').insert(playlistData);
-        res.json({ success: true, playlistId }); // Return the ID of the newly created playlist
+        res.json({ success: true, playlistId, items: playlistItems }); // Return the ID of the newly created playlist and the items
 
     } catch (error) {
         console.error("Erreur import PPTX:", error);
@@ -1008,33 +1446,113 @@ app.post('/api/admin/import-pptx', authMiddleware, checkRole(['admin', 'editor']
 
 app.post('/api/admin/playlists', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
     const { id, name, items, backgroundUrl, backgroundColor, resolution } = req.body;
-    // On génère un ID si c'est une nouvelle playlist
-    const playlistId = id || `p_${Date.now()}`; // Use provided ID or generate new
-    const playlistData = { id: playlistId, name, items: JSON.stringify(items), backgroundUrl, backgroundColor, resolution };
+    const playlistId = id || `p_${Date.now()}`;
+    
+    // Déterminer le statut selon le rôle de l'utilisateur
+    const isValidator = req.user.role === 'admin' || req.user.role === 'editor';
+    let status = req.body.status || 'approved';
+    if (!isValidator) {
+        // Un auteur ne peut enregistrer qu'en Brouillon ou En attente de validation
+        status = req.body.status === 'pending' ? 'pending' : 'draft';
+    }
+
+    const playlistData = { 
+        id: playlistId, 
+        name, 
+        items: JSON.stringify(items), 
+        backgroundUrl, 
+        backgroundColor, 
+        resolution,
+        status
+    };
+
     db('playlists').where({ id: playlistId }).first()
         .then(async (existingPlaylist) => {
             if (existingPlaylist) {
+                // Vérifier les droits
+                if (req.user.role === 'author' && existingPlaylist.createdBy !== req.user.username) {
+                    return res.status(403).send("Vous n'êtes pas autorisé à modifier ce diaporama car il ne vous appartient pas.");
+                }
+                if (req.user.siteId && existingPlaylist.siteId !== req.user.siteId) {
+                    return res.status(403).send("Vous n'êtes pas autorisé à modifier un diaporama d'un autre site.");
+                }
+
+                playlistData.updatedBy = req.user.username;
+                playlistData.updatedAt = new Date().toISOString();
                 await db('playlists').where({ id: playlistId }).update(playlistData);
             } else {
+                playlistData.createdBy = req.user.username;
+                playlistData.updatedBy = req.user.username;
+                playlistData.createdAt = new Date().toISOString();
+                playlistData.updatedAt = new Date().toISOString();
+                playlistData.siteId = req.user.siteId; // Assigner le siteId
                 await db('playlists').insert(playlistData);
             }
-            checkSchedules(null, true); // Force la mise à jour des écrans utilisant ce diaporama
+            checkSchedules(null, true);
             res.json({ success: true, playlistId });
         })
         .catch(err => res.status(500).send('Error saving playlist: ' + err.message));
 });
 
-app.delete('/api/admin/playlists/:id', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
+app.post('/api/admin/playlists/:id/approve', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
     const { id } = req.params;
-    db('playlists').where({ id }).del()
-        .then(async (count) => {
+    db('playlists').where({ id }).update({ status: 'approved' })
+        .then((count) => {
             if (count > 0) {
-                await db('players').where({ manualPlaylistId: id }).update({ manualPlaylistId: null });
-                await db('players').where({ currentPlaylistId: id }).update({ currentPlaylistId: null });
+                checkSchedules(null, true);
                 res.json({ success: true });
             } else {
                 res.status(404).send('Diaporama non trouvé');
             }
+        })
+        .catch(err => res.status(500).send('Error approving playlist: ' + err.message));
+});
+
+app.post('/api/admin/playlists/:playlistId/publish', authMiddleware, checkRole(['admin', 'editor']), async (req, res) => {
+    const { playlistId } = req.params;
+    const { playerIds, groupIds } = req.body;
+    
+    try {
+        // 1. Valider le diaporama automatiquement lors de la publication
+        await db('playlists').where({ id: playlistId }).update({ status: 'approved' });
+        
+        // 2. Assigner aux lecteurs individuels sélectionnés
+        if (playerIds && Array.isArray(playerIds)) {
+            await db('players').whereIn('id', playerIds).update({ manualPlaylistId: playlistId, manualSequenceId: null });
+        }
+        
+        // 3. Assigner aux groupes d'écrans sélectionnés
+        if (groupIds && Array.isArray(groupIds) && groupIds.length > 0) {
+            await db('players').whereIn('groupId', groupIds).update({ manualPlaylistId: playlistId, manualSequenceId: null });
+        }
+        
+        checkSchedules(null, true);
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Erreur publication direct:", err);
+        res.status(500).send('Error publishing playlist: ' + err.message);
+    }
+});
+
+app.delete('/api/admin/playlists/:id', authMiddleware, checkRole(['admin', 'editor', 'author']), (req, res) => {
+    const { id } = req.params;
+    db('playlists').where({ id }).first()
+        .then(async (existingPlaylist) => {
+            if (!existingPlaylist) return res.status(404).send('Diaporama non trouvé');
+
+            // Vérifier les droits
+            if (req.user.role === 'author' && existingPlaylist.createdBy !== req.user.username) {
+                return res.status(403).send("Vous n'êtes pas autorisé à supprimer ce diaporama car il ne vous appartient pas.");
+            }
+            if (req.user.siteId && existingPlaylist.siteId !== req.user.siteId) {
+                return res.status(403).send("Vous n'êtes pas autorisé à supprimer un diaporama d'un autre site.");
+            }
+
+            await db('playlists').where({ id }).del();
+            await db('players').where({ manualPlaylistId: id }).update({ manualPlaylistId: null });
+            await db('players').where({ currentPlaylistId: id }).update({ currentPlaylistId: null });
+            await db('schedules').where({ playlistId: id }).del();
+            res.json({ success: true });
         })
         .catch(err => res.status(500).send('Error deleting playlist: ' + err.message));
 });
@@ -1077,6 +1595,53 @@ app.post('/api/admin/settings', authMiddleware, checkRole(['admin']), async (req
     } catch (err) {
         console.error("Erreur sauvegarde settings:", err);
         res.status(500).send('Error saving settings: ' + err.message);
+    }
+});
+
+// API Cookies YouTube
+app.get('/api/admin/system/cookies/status', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        const exists = await fs.pathExists(cookiesPath);
+        res.json({ exists });
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
+});
+
+app.post('/api/admin/system/cookies', authMiddleware, checkRole(['admin']), upload.single('file'), async (req, res) => {
+    if (!req.file) return res.status(400).send('Aucun fichier fourni.');
+    try {
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        await fs.move(req.file.path, cookiesPath, { overwrite: true });
+        res.json({ success: true, message: 'Fichier cookies.txt mis à jour.' });
+    } catch (err) {
+        res.status(500).send('Erreur lors de la sauvegarde : ' + err.message);
+    }
+});
+
+app.delete('/api/admin/system/cookies', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (await fs.pathExists(cookiesPath)) {
+            await fs.remove(cookiesPath);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
+});
+
+// Génération de Code QR locale et offline-safe
+app.get('/api/admin/qrcode', authMiddleware, checkRole(['admin', 'editor', 'author', 'player']), async (req, res) => {
+    const { text } = req.query;
+    if (!text) return res.status(400).send('Paramètre text manquant.');
+    try {
+        const buffer = await QRCode.toBuffer(text, { type: 'png', width: 512, margin: 1 });
+        res.set('Content-Type', 'image/png');
+        res.send(buffer);
+    } catch (err) {
+        res.status(500).send('Erreur génération QR Code : ' + err.message);
     }
 });
 app.post('/api/admin/test-email', authMiddleware, checkRole(['admin']), async (req, res) => {
@@ -1248,11 +1813,12 @@ app.post('/api/admin/players/approve/:deviceId', authMiddleware, checkRole(['adm
 app.delete('/api/admin/players/:deviceId', authMiddleware, checkRole(['admin']), (req, res) => {
     const { deviceId } = req.params;
     db('players').where({ id: deviceId }).del()
-        .then((count) => {
+        .then(async (count) => {
             if (count > 0) {
                 io.sockets.sockets.forEach(socket => {
                     if (socket.handshake.query.deviceId === deviceId) socket.disconnect(true);
                 });
+                await db('schedules').where({ deviceId }).del();
                 res.json({ success: true });
             } else {
                 res.status(404).send('Player non trouvé');
@@ -1302,26 +1868,43 @@ app.post('/api/admin/assign', authMiddleware, checkRole(['admin', 'editor']), (r
 // Socket.io avec authentification et gestion de salon (Room)
 io.use((socket, next) => {
     const authHeader = socket.handshake.auth.token; // Peut être API_KEY ou JWT
+    const deviceId = socket.handshake.query.deviceId;
 
     // Authentification pour les clients Pi (API Key)
     if (authHeader === API_KEY) return next();
 
     // Authentification pour les clients Admin (JWT)
     if (authHeader) {
+        // Gestion optionnelle du préfixe Bearer
+        const token = (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : authHeader;
+
         try {
-            const decoded = jwt.verify(authHeader, JWT_SECRET);
+            const decoded = jwt.verify(token, JWT_SECRET);
             socket.user = decoded; // Attacher les infos utilisateur au socket
             return next();
         } catch (err) {
+            if (deviceId) {
+                console.warn(`[SOCKET] Clé API invalide ou malformée fournie par "${deviceId}" (${socket.handshake.address})`);
+            } else {
+                console.error(`[SOCKET] Échec auth JWT: ${err.message}`);
+            }
             return next(new Error('Auth error: Invalid or expired token'));
         }
     }
+    console.warn(`[SOCKET] Tentative de connexion sans authentification valide de ${socket.handshake.address}`);
     next(new Error('Auth error'));
 });
 
 io.on('connection', async (socket) => {
     const deviceId = socket.handshake.query.deviceId;
-    
+
+    // Autoriser les connexions provenant de l'interface d'administration (Admin/Editor)
+    if (socket.user) {
+        console.log(`[SOCKET] Interface Admin connectée (Utilisateur: ${socket.user.username})`);
+        return; // Les admins n'ont pas besoin des listeners spécifiques aux "Players" ci-dessous
+    }
+
+    // Pour les Players (Raspberry Pi), le deviceId est obligatoire
     if (!deviceId || deviceId === 'undefined' || deviceId === 'null') {
         console.error(`[SOCKET] Connexion refusée : deviceId manquant ou invalide pour le socket ${socket.id}`);
         return socket.disconnect(true);
@@ -1381,7 +1964,7 @@ io.on('connection', async (socket) => {
             wifiSSID: info.ssid,
             wifiSignal: info.signal
         })
-            .then(() => console.log(`Player ${deviceId} info updated: IP=${info.ip}, MAC=${info.mac}`))
+            .then(() => console.log(`Player ${deviceId} info updated: IP=${info.ip} | HW Accel: ${info.gpu || 'Inconnu'}`))
             .catch(err => console.error(`Error updating player info for ${deviceId}:`, err));
     });
 

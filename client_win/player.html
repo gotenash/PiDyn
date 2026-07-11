@@ -183,8 +183,16 @@
             script.async = true;
             script.onload = () => {
                 log("Script Socket.io chargé.");
-                if (typeof io === 'undefined') return log("Erreur: io non défini", true);
+                if (typeof io === 'undefined') {
+                    log("Erreur: io non défini", true);
+                    script.remove();
+                    return;
+                }
                 if (playlistData && playlistData.deviceId) initSocketWithId(playlistData.deviceId);
+            };
+            script.onerror = () => {
+                log("Échec chargement Socket.io (Serveur injoignable ?)", false);
+                script.remove();
             };
             document.head.appendChild(script);
         }
@@ -239,8 +247,14 @@
                     playlistData = newData;
                     currentPlaylistId = newData.id;
                     
-                    // On récupère l'IP du serveur depuis le fichier si elle n'est pas en paramètre
-                    if (!previewId) loadSocketIO(playlistData.serverUrl || serverUrl);
+                    // On récupère l'IP du serveur depuis le fichier si elle n'est pas en paramètre et on tente la connexion socket
+                    if (!previewId) {
+                        if (typeof io === 'undefined') {
+                            loadSocketIO(playlistData.serverUrl || serverUrl);
+                        } else if (playlistData.deviceId && !socket) {
+                            initSocketWithId(playlistData.deviceId);
+                        }
+                    }
                     document.getElementById('debug-log').style.display = 'none';
 
                     // Si la playlist a changé d'ID, on force le redémarrage pour éviter les erreurs d'index
@@ -346,7 +360,10 @@
                     if(!res.ok) throw new Error(`HTTP ${res.status}`);
                     // console.log("Stats envoyées avec succès");
                 })
-                .catch(err => log("Erreur stats: " + err.message, true));
+                .catch(err => {
+                    // Log silencieux dans la console du navigateur en cas d'erreur de statistiques hors-ligne
+                    console.warn("Erreur stats (hors-ligne ?) :", err.message);
+                });
             }
 
             // Nettoyer les intervalles d'horloge de la page précédente
@@ -401,7 +418,9 @@
                     // On utilise le chemin local si disponible, sinon le chemin distant avec l'URL du serveur
                     let mediaUrl = zone.localUrl || zone.url || "";
                     const token = apiKey || (playlistData && playlistData.apiKey);
-                    if (mediaUrl.startsWith('/media')) mediaUrl = `${serverUrl}${mediaUrl}${token ? '?apiKey=' + token : ''}`;
+                    if (mediaUrl.startsWith('/media') || mediaUrl.startsWith('/api/')) {
+                        mediaUrl = `${serverUrl}${mediaUrl}${token ? (mediaUrl.includes('?') ? '&' : '?') + 'apiKey=' + token : ''}`;
+                    }
 
                     if (zone.type === 'image') {
                         zoneElement.innerHTML = `<img src="${mediaUrl}">`;
@@ -409,11 +428,26 @@
                         const videoElement = document.createElement('video');
                         videoElement.src = mediaUrl;
                         videoElement.autoplay = true;
-                        videoElement.muted = true;
+                        videoElement.muted = true; // Démarre muet pour contourner la politique autoplay
                         videoElement.loop = true;
+                        videoElement.playsInline = true;
                         zoneElement.appendChild(videoElement);
+                        // Dé-muter après lancement si le son est souhaité
+                        videoElement.play().then(() => {
+                            if (!zone.muted) videoElement.muted = false;
+                        }).catch(() => { /* reste muet si lecture impossible */ });
                     } else if (zone.type === 'web') {
-                        zoneElement.innerHTML = `<iframe src="${mediaUrl}"></iframe>`;
+                        const zoom = zone.webZoom || 1.0;
+                        const panX = zone.webPanX || 0;
+                        const panY = zone.webPanY || 0;
+                        const iframeUrl = zone.url.startsWith('/') ? mediaUrl : zone.url;
+                        zoneElement.innerHTML = `<div style="width:100%;height:100%;overflow:hidden;position:relative;">
+                            <iframe src="${iframeUrl}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;"></iframe>
+                        </div>`;
+                    } else if (zone.type === 'qrcode') {
+                        const qrText = zone.text || 'https://pidyn.com';
+                        const qrUrl = zone.localUrl ? mediaUrl : `${serverUrl}/api/admin/qrcode?text=${encodeURIComponent(qrText)}${token ? '&apiKey=' + token : ''}`;
+                        zoneElement.innerHTML = `<img src="${qrUrl}" style="width:100%;height:100%;object-fit:contain;">`;
                     } else if (zone.type === 'text') {
                         const content = zone.isMarquee ? 
                             `<div class="marquee-container"><div class="marquee-content text-content">${zone.text || ''}</div></div>` :

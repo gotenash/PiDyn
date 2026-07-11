@@ -59,6 +59,7 @@
             }
             if (role === 'admin') {
                 html += `<button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>`;
+                html += `<button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>`;
                 html += `<button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>`;
             }
             nav.innerHTML = html;
@@ -116,7 +117,13 @@
             if (res.ok) alert('Menu enregistré avec succès !');
         }
 
-        function logout() { localStorage.removeItem('pidyn_token'); localStorage.removeItem('pidyn_role'); window.location.href = '/'; }
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
         init();
     </script>
 </body>

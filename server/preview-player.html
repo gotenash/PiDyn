@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prévisualisation du Diaporama</title>
+    <style>
+        body, html { margin: 0; padding: 0; background: black; overflow: hidden; height: 100vh; width: 100vw; }
+        
+        #player-screen {
+            position: relative; width: 100%; height: 100%; overflow: hidden; background-color: black;
+        }
+        #player-screen .bg-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1;
+        }
+        #player-screen .zone {
+            position: absolute; overflow: hidden; display: flex; justify-content: center; align-items: center; z-index: 2;
+        }
+        #player-screen .zone img { width: 100%; height: 100%; object-fit: contain; }
+        
+        #player-screen .zone video {
+            width: 100%; height: 100%; object-fit: contain; background-color: black; display: block;
+            pointer-events: auto;
+        }
+        #player-screen .zone iframe { width: 100%; height: 100%; border: none; }
+        #player-screen .zone .clock-content { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+        #player-screen .zone .text-content {
+            color: white; font-family: sans-serif; font-size: 3vw; text-align: center; padding: 1%;
+            word-wrap: break-word; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Animations d'entrée */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideTop { from { transform: translateY(-50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes slideBottom { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes slideLeft { from { transform: translateX(-50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideRight { from { transform: translateX(50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes zoomIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .anim-fade-in { animation: fadeIn 1s ease-out forwards; }
+        .anim-slide-top { animation: slideTop 0.8s ease-out forwards; }
+        .anim-slide-bottom { animation: slideBottom 0.8s ease-out forwards; }
+        .anim-slide-left { animation: slideLeft 0.8s ease-out forwards; }
+        .anim-slide-right { animation: slideRight 0.8s ease-out forwards; }
+        .anim-zoom-in { animation: zoomIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
+        /* Animations de sortie */
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        @keyframes zoomOut { from { transform: scale(1); opacity: 1; } to { transform: scale(1.2); opacity: 0; } }
+        .anim-fade-out { animation: fadeOut 0.8s ease-in forwards; }
+        .anim-zoom-out { animation: zoomOut 0.8s ease-in forwards; }
+
+        .marquee-container { overflow: hidden; white-space: nowrap; width: 100%; display: flex; align-items: center; }
+        .marquee-content { display: inline-block; padding-left: 100%; animation: marquee 15s linear infinite; }
+        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-200%); } }
+
+        #template-preview-layer {
+            position: absolute; inset: 0; z-index: 4; display: none; background: rgba(0,0,0,0.8); 
+            flex-direction: column; justify-content: center; align-items: center; padding: 20px;
+            text-align: center; color: white; font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="player-screen">
+        <div id="loader" style="color: white; font-family: sans-serif; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+            <span>Chargement de la prévisualisation...</span>
+        </div>
+        <img id="global-background" class="bg-layer" src="" style="display:none;">
+        <div id="template-preview-layer"></div>
+        <div id="current-page-zones"></div>
+    </div>
+
+    <script>
+        let currentIndex = 0;
+        let playlistData = { items: [] };
+        let playTimeout = null;
+        let activeClockIntervals = [];
+        let availableMedia = [];
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const previewId = urlParams.get('id');
+        const token = urlParams.get('token');
+        const previewAuth = token ? `?token=${token}` : '';
+        const previewAuthAmp = token ? `&token=${token}` : '';
+
+        function withPreviewAuth(url) {
+            if (!url) return url;
+            return url.includes('?') ? `${url}${previewAuthAmp}` : `${url}${previewAuth}`;
+        }
+
+        async function loadPreviewData() {
+            try {
+                if (!previewId || !token) {
+                    document.getElementById('loader').innerText = "Identifiant ou jeton manquant.";
+                    return;
+                }
+
+                // 1. Charger la liste des médias pour récupérer et injecter les polices personnalisées
+                const mediaRes = await fetch(`/api/admin/media?token=${encodeURIComponent(token)}`);
+                if (mediaRes.ok) {
+                    availableMedia = await mediaRes.json();
+                    injectCustomFonts();
+                }
+
+                // 2. Charger les données de la playlist
+                const res = await fetch(`/api/admin/data?token=${encodeURIComponent(token)}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                
+                if (data.playlists && data.playlists[previewId]) {
+                    playlistData = data.playlists[previewId];
+                    document.getElementById('loader').style.display = 'none';
+                    if (playlistData.items && playlistData.items.length > 0) {
+                        playNext();
+                    } else {
+                        document.getElementById('loader').innerText = "Le diaporama est vide.";
+                    }
+                } else {
+                    document.getElementById('loader').innerText = "Diaporama introuvable.";
+                }
+            } catch (e) {
+                document.getElementById('loader').innerText = "Erreur de chargement : " + e.message;
+            }
+        }
+
+        // Injection dynamique des polices à l'identique de l'éditeur
+        function injectCustomFonts() {
+            const customFonts = availableMedia.filter(m => m.type === 'font');
+            customFonts.forEach(m => {
+                const fontName = `font-${m.id}`;
+                const styleId = `font-style-${m.id}`;
+                if (!document.getElementById(styleId)) {
+                    const style = document.createElement('style');
+                    style.id = styleId;
+                    style.textContent = `@font-face { font-family: "${fontName}"; src: url("${withPreviewAuth(m.url)}"); }`;
+                    document.head.appendChild(style);
+                }
+            });
+        }
+
+        function playNext() {
+            if (playTimeout) clearTimeout(playTimeout);
+            if (!playlistData.items || playlistData.items.length === 0) return;
+            if (currentIndex >= playlistData.items.length) currentIndex = 0;
+
+            const page = playlistData.items[currentIndex];
+            const globalBgElement = document.getElementById('global-background');
+            const pageZonesContainer = document.getElementById('current-page-zones');
+            const tplLayer = document.getElementById('template-preview-layer');
+
+            activeClockIntervals.forEach(clearInterval);
+            activeClockIntervals = [];
+
+            document.getElementById('player-screen').style.backgroundColor = page.backgroundColor || playlistData.backgroundColor || 'black';
+
+            const pageBgUrl = page.backgroundUrl || playlistData.backgroundUrl || '';
+            if (pageBgUrl) {
+                globalBgElement.src = withPreviewAuth(pageBgUrl);
+                globalBgElement.style.display = 'block';
+            } else {
+                globalBgElement.style.display = 'none';
+            }
+
+            // Rendu des Templates
+            if (page.template) {
+                tplLayer.style.display = 'flex';
+                tplLayer.style.padding = page.template === 'video_fullscreen' ? '0' : '20px';
+                
+                if (page.template === 'canteen') {
+                    tplLayer.innerHTML = `<div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px;">${page.data.title || 'MENU'}</div><div><p><b>Entrée:</b> ${page.data.starter || ''}</p><p><b>Plat:</b> ${page.data.main || ''}</p><p><b>Dessert:</b> ${page.data.dessert || ''}</p></div>`;
+                } else if (page.template === 'meeting') {
+                    tplLayer.innerHTML = `<div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${page.data.room || ''}</div><div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${page.data.subject || ''}</div><div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${page.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${page.data.status || ''}</div>`;
+                } else if (page.template === 'video_fullscreen') {
+                    if (page.data && page.data.videoUrl) {
+                        let html = `<video src="${withPreviewAuth(page.data.videoUrl)}" autoplay playsinline ${page.data.muted ? 'muted' : ''} ${page.data.loop ? 'loop' : ''} style="width:100%; height:100%; object-fit:${page.data.fitMode || 'cover'};"></video>`;
+                        if (page.data.legend) {
+                            html += `<div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.6); color:${page.data.legendColor || 'white'}; font-size:14px; padding:5px; text-align:center;">${page.data.legend}</div>`;
+                        }
+                        tplLayer.innerHTML = html;
+                        const v = tplLayer.querySelector('video');
+                        if (v) {
+                            v.play().catch(() => {
+                                v.muted = true;
+                                v.play();
+                            });
+                        }
+                    } else tplLayer.innerHTML = `<div style="color:#bdc3c7;">Aucune vidéo sélectionnée</div>`;
+                } else if (page.template === 'weather') {
+                    const city = page.data.city || 'Paris';
+                    const lat = page.data.lat || '48.8566';
+                    const lon = page.data.lon || '2.3522';
+                    tplLayer.innerHTML = `<div style="color:#3498db; font-weight:bold; font-size:24px; margin-bottom:15px;">MÉTÉO - ${city.toUpperCase()}</div><div id="weather-loader" style="color:#bdc3c7;">Chargement des prévisions...</div>`;
+                    
+                    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`)
+                        .then(r => r.json())
+                        .then(data => {
+                            const loader = tplLayer.querySelector('#weather-loader');
+                            if (loader) loader.remove();
+                            const grid = document.createElement('div');
+                            grid.style.cssText = "display:flex; gap:10px; justify-content:center; width:90%;";
+                            for (let i = 0; i < 3; i++) {
+                                const date = new Date(data.daily.time[i]).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
+                                const icon = getWeatherIcon(data.daily.weathercode[i]);
+                                const max = Math.round(data.daily.temperature_2m_max[i]);
+                                const min = Math.round(data.daily.temperature_2m_min[i]);
+                                const rain = data.daily.precipitation_sum[i];
+                                grid.innerHTML += `
+                                    <div style="background:rgba(255,255,255,0.1); padding:10px; border-radius:10px; flex:1; text-align:center; font-size:12px;">
+                                        <div style="font-weight:bold; color:#3498db; margin-bottom:5px;">${date.toUpperCase()}</div>
+                                        <div style="font-size:24px; margin:5px 0;">${icon}</div>
+                                        <div style="font-weight:bold; font-size:14px;">${max}° / ${min}°</div>
+                                        <div style="font-size:10px; opacity:0.7; margin-top:5px;">💧 ${rain}mm</div>
+                                    </div>`;
+                            }
+                            tplLayer.appendChild(grid);
+                        }).catch(() => { tplLayer.innerHTML = '<div style="color:#e74c3c; font-weight:bold;">Météo indisponible</div>'; });
+                }
+            } else tplLayer.style.display = 'none';
+
+            pageZonesContainer.innerHTML = '';
+
+            // Rendu des Zones
+            if (page.zones && page.zones.length > 0 && !page.template) {
+                page.zones.forEach(zone => {
+                    const zoneElement = document.createElement('div');
+                    zoneElement.className = 'zone';
+                    let transformStr = '';
+                    if (zone.rotate) transformStr += `rotate(${zone.rotate}deg) `;
+                    if (zone.skewX) transformStr += `skewX(${zone.skewX}deg) `;
+                    zoneElement.style.cssText = `left:${zone.x}%; top:${zone.y}%; width:${zone.w}%; height:${zone.h}%;` + (transformStr ? ` transform: ${transformStr};` : '');
+
+                    if (zone.animationIn && zone.animationIn !== 'none') {
+                        zoneElement.classList.add(`anim-${zone.animationIn}`);
+                        zoneElement.style.animationDuration = (zone.animationInDuration || 1000) + 'ms';
+                    }
+
+                    const mediaUrl = withPreviewAuth(zone.url);
+
+                    if (zone.type === 'image') {
+                        zoneElement.innerHTML = `<img src="${mediaUrl}">`;
+                    } else if (zone.type === 'video') {
+                        const videoElement = document.createElement('video');
+                        videoElement.src = mediaUrl;
+                        videoElement.autoplay = true;
+                        videoElement.playsinline = true;
+                        videoElement.loop = true;
+                        
+                        videoElement.muted = (zone.muted !== false); 
+                        
+                        zoneElement.appendChild(videoElement);
+                        
+                        setTimeout(() => {
+                            videoElement.play().catch(() => {
+                                videoElement.muted = true;
+                                videoElement.play().catch(e => console.log("Échec lecture vidéo:", e));
+                            });
+                        }, 30);
+                    } else if (zone.type === 'web') {
+                        const zoom = zone.webZoom || 1.0;
+                        const panX = zone.webPanX || 0;
+                        const panY = zone.webPanY || 0;
+                        const iframeUrl = zone.url.startsWith('/') ? mediaUrl : zone.url;
+                        zoneElement.innerHTML = `<div style="width:100%;height:100%;overflow:hidden;position:relative;">
+                            <iframe src="${iframeUrl}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;"></iframe>
+                        </div>`;
+                    } else if (zone.type === 'qrcode') {
+                        const qrText = zone.text || 'https://pidyn.com';
+                        const rawQrUrl = `/api/admin/qrcode?text=${encodeURIComponent(qrText)}`;
+                        zoneElement.innerHTML = `<img src="${withPreviewAuth(rawQrUrl)}" style="width:100%;height:100%;object-fit:contain;">`;
+                    } else if (zone.type === 'text') {
+                        zoneElement.innerHTML = zone.isMarquee ? 
+                            `<div class="marquee-container"><div class="marquee-content text-content">${zone.text || ''}</div></div>` :
+                            `<div class="text-content">${zone.text || ''}</div>`;
+                        const txt = zoneElement.querySelector('.text-content');
+                        txt.style.cssText += `font-family:${zone.fontFamily || 'sans-serif'}; font-size:${zone.fontSize || 24}px; color:${zone.color || 'white'}; text-align:${zone.textAlign || 'center'};`;
+                    } else if (zone.type === 'clock') {
+                        zoneElement.innerHTML = `<div class="clock-content"></div>`;
+                        const clk = zoneElement.querySelector('.clock-content');
+                        clk.style.cssText += `font-family:${zone.fontFamily || 'sans-serif'}; font-size:${zone.fontSize || 24}px; color:${zone.color || 'white'};`;
+                        const up = () => clk.innerText = formatClock(new Date(), zone.clockFormat || 'HH:mm:ss');
+                        up(); activeClockIntervals.push(setInterval(up, 1000));
+                    }
+
+                    // Gestion du timing d'apparition (start) et de disparition (duration)
+                    const startMs = zone.start || 0;
+                    const durationMs = zone.duration || page.duration || 5000;
+                    const endMs = startMs + durationMs;
+
+                    if (startMs > 0) {
+                        zoneElement.style.display = 'none';
+                        setTimeout(() => {
+                            zoneElement.style.display = 'block';
+                            const v = zoneElement.querySelector('video');
+                            if (v) v.play().catch(e => console.warn(e));
+                        }, startMs);
+                    }
+
+                    if (zone.animationOut && zone.animationOut !== 'none') {
+                        const outDuration = zone.animationOutDuration || 800;
+                        setTimeout(() => {
+                            zoneElement.classList.add(`anim-${zone.animationOut}`);
+                            zoneElement.style.animationDuration = outDuration + 'ms';
+                        }, Math.max(0, endMs - outDuration));
+                    }
+
+                    setTimeout(() => {
+                        zoneElement.style.display = 'none';
+                    }, endMs);
+
+                    pageZonesContainer.appendChild(zoneElement);
+                });
+            }
+
+            currentIndex = (currentIndex + 1) % playlistData.items.length;
+            playTimeout = setTimeout(playNext, page.duration || 5000);
+        }
+
+        function getWeatherIcon(code) {
+            if (code === 0) return '☀️';
+            if (code <= 3) return '⛅';
+            if (code <= 48) return '🌫️';
+            if (code <= 55) return '🌦️';
+            if (code <= 65) return '🌧️';
+            if (code <= 77) return '❄️';
+            if (code <= 82) return '🌦️';
+            if (code <= 99) return '⛈️';
+            return '☁️';
+        }
+
+        function formatClock(date, format) {
+            const h = String(date.getHours()).padStart(2, '0'); const m = String(date.getMinutes()).padStart(2, '0'); const s = String(date.getSeconds()).padStart(2, '0');
+            return format.replace(/HH/g, h).replace(/mm/g, m).replace(/ss/g, s);
+        }
+		// Débloquer le son sur toutes les vidéos en cours dès que l'utilisateur clique n'importe où sur l'aperçu
+        window.addEventListener('click', () => {
+            const videos = document.querySelectorAll('video');
+            videos.forEach(v => {
+                // Si la playlist ou la zone voulait du son (non muet), on l'active au premier clic
+                // Vous pouvez aussi forcer 'v.muted = false;' si vous voulez TOUT entendre sans condition
+                v.muted = false; 
+                v.play().catch(e => console.log("Erreur réactivation son:", e));
+            });
+            console.log("Audio débloqué par l'utilisateur !");
+        }, { once: true }); // Ne s'exécute qu'une seule fois
+        loadPreviewData();
+    </script>
+</body>
+</html>

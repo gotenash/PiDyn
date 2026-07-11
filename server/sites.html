@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>PiDyn - Gestion Sites</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #2c3e50; color: #ecf0f1; margin: 20px; }
+        h1, h2 { color: #3498db; }
+        section { background: #34495e; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input, select, textarea, button { padding: 10px; font-size: 14px; border-radius: 4px; border: none; }
+        input, select, textarea { background: #2c3e50; color: white; border: 1px solid #7f8c8d; }
+        textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 80px; }
+        button { background: #3498db; color: white; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button:hover { background: #2980b9; }
+        button.secondary { background: #7f8c8d; }
+        button.secondary:hover { background: #95a5a6; }
+        button.danger { background: #e74c3c; }
+        button.danger:hover { background: #c0392b; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #7f8c8d; }
+        th { background: #2c3e50; color: #3498db; }
+        tr:hover { background: rgba(255,255,255,0.05); }
+        nav { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+        nav button { background: #34495e; }
+        nav button.secondary { background: #2c3e50; }
+    </style>
+</head>
+<body>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>PiDyn - Gestion des Sites</h1>
+        <button class="secondary" onclick="logout()">Déconnexion</button>
+    </header>
+
+    <nav>
+        <button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>
+        <button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>
+        <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
+        <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
+        <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
+        <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button onclick="window.location.href='/sites'">🏢 Sites</button>
+        <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
+    </nav>
+
+    <section>
+        <h2 id="form-title">Ajouter / Modifier un Site</h2>
+        <input type="hidden" id="site-id">
+        <div style="display: flex; flex-direction: column; gap: 15px; max-width: 500px;">
+            <div>
+                <label style="display:block; margin-bottom:5px;">Nom du site</label>
+                <input type="text" id="site-name" placeholder="ex: Campus Nord, Agence Lyon..." style="width: 100%; box-sizing: border-box;">
+            </div>
+            <div>
+                <label style="display:block; margin-bottom:5px;">Description</label>
+                <textarea id="site-desc" placeholder="Description facultative du site..."></textarea>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button onclick="saveSite()">Enregistrer</button>
+                <button class="secondary" onclick="resetForm()">Annuler</button>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Liste des Sites</h2>
+        <div id="sites-list">Chargement des sites...</div>
+    </section>
+
+    <script>
+        const token = localStorage.getItem('pidyn_token');
+        const role = localStorage.getItem('pidyn_role');
+
+        if (!token || role !== 'admin') {
+            alert("Accès réservé aux administrateurs");
+            window.location.href = '/';
+        }
+
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
+
+        function resetForm() {
+            document.getElementById('site-id').value = '';
+            document.getElementById('site-name').value = '';
+            document.getElementById('site-desc').value = '';
+            document.getElementById('form-title').innerText = "Ajouter / Modifier un Site";
+        }
+
+        async function loadSites() {
+            try {
+                const res = await fetch('/api/admin/sites', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.status === 403) window.location.href = '/';
+                const sites = await res.json();
+
+                let html = '<table><tr><th>ID</th><th>Nom du site</th><th>Description</th><th>Actions</th></tr>';
+                if (sites.length === 0) {
+                    html += '<tr><td colspan="4" style="text-align:center; color:#bdc3c7;">Aucun site configuré.</td></tr>';
+                } else {
+                    sites.forEach(s => {
+                        html += `<tr>
+                            <td><code>${s.id}</code></td>
+                            <td><strong>${s.name}</strong></td>
+                            <td>${s.description || '<em style="color:#bdc3c7">Aucune</em>'}</td>
+                            <td> 
+                                <button class="secondary" title="Modifier" onclick="editSite('${s.id}', '${s.name.replace(/'/g, "\\'")}', '${(s.description || '').replace(/'/g, "\\'")}')">✏️</button>
+                                <button class="danger" title="Supprimer" onclick="deleteSite('${s.id}')">🗑️</button>
+                            </td>
+                        </tr>`;
+                    });
+                }
+                document.getElementById('sites-list').innerHTML = html + '</table>';
+            } catch (err) {
+                console.error(err);
+                document.getElementById('sites-list').innerText = "Erreur lors du chargement des sites.";
+            }
+        }
+
+        function editSite(id, name, desc) {
+            document.getElementById('site-id').value = id;
+            document.getElementById('site-name').value = name;
+            document.getElementById('site-desc').value = desc;
+            document.getElementById('form-title').innerText = "Modifier le Site : " + name;
+        }
+
+        async function saveSite() {
+            const id = document.getElementById('site-id').value;
+            const name = document.getElementById('site-name').value;
+            const description = document.getElementById('site-desc').value;
+
+            if (!name) return alert("Veuillez saisir un nom de site");
+
+            const res = await fetch('/api/admin/sites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ id: id || undefined, name, description })
+            });
+
+            if (res.ok) {
+                alert('Site enregistré !');
+                resetForm();
+                loadSites();
+            } else {
+                const errText = await res.text();
+                alert('Erreur lors de l\'enregistrement : ' + errText);
+            }
+        }
+
+        async function deleteSite(id) {
+            if (!confirm(`Supprimer le site ${id} ?`)) return;
+            const res = await fetch(`/api/admin/sites/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadSites();
+            } else {
+                const errText = await res.text();
+                alert('Erreur lors de la suppression : ' + errText);
+            }
+        }
+
+        loadSites();
+    </script>
+</body>
+</html>

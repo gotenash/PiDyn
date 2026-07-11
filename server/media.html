@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Médiathèque</title>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
         body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; }
         header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
@@ -11,14 +12,136 @@
         .filters select, .filters input { padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #34495e; color: white; }
         button { padding: 10px 15px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; }
         button.secondary { background: #6c757d; }
-        .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 15px; }
-        .media-item { background: #34495e; border-radius: 8px; overflow: hidden; text-align: center; padding: 10px; position: relative; }
-        .media-item img, .media-item video { max-width: 100%; height: 100px; object-fit: contain; display: block; margin: 0 auto 10px auto; }
-        .media-item .filename { font-size: 12px; word-break: break-all; margin-bottom: 5px; }
-        .media-item .meta { font-size: 10px; color: #bdc3c7; }
-        .media-item .delete-btn { position: absolute; top: 5px; right: 5px; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        button:disabled { background: #7f8c8d !important; cursor: not-allowed; opacity: 0.6; }
         .upload-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #34495e; }
         .upload-section input[type="file"] { margin-right: 10px; }
+
+        /* Grille par défaut (vignettes) */
+        .media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; }
+        .media-item { background: #34495e; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 15px; position: relative; box-shadow: 0 4px 6px rgba(0,0,0,0.15); transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s; border: 2px solid transparent; cursor: pointer; user-select: none; }
+        .media-item:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.25); }
+        .media-item.selected { border-color: #3498db; background: #2c3e50; }
+        .media-item.folder { border: 2px dashed #9b59b6; background: #2c3e50; }
+        .media-item.folder:hover { border-color: #8e44ad; background: #34495e; }
+        .media-item.folder .folder-icon { font-size: 50px; margin-bottom: 10px; color: #f1c40f; text-align: center; }
+        .media-select-checkbox { position: absolute; top: 8px; left: 8px; width: 18px; height: 18px; cursor: pointer; z-index: 11; accent-color: #3498db; }
+        .media-content { display: flex; flex-direction: column; align-items: center; width: 100%; }
+        .media-item img, .media-item video { max-width: 100%; height: 100px; object-fit: contain; display: block; margin: 0 auto 10px auto; border-radius: 4px; }
+        .media-item iframe { width: 100%; height: 100px; border: none; background: white; border-radius: 4px; margin-bottom: 10px; }
+        .media-item .font-preview-box { height: 100px; border-radius: 4px; margin-bottom: 10px; background: rgba(0,0,0,0.2); }
+        .media-info { width: 100%; text-align: center; margin-top: 5px; }
+        .media-item .filename { font-size: 13px; font-weight: bold; word-break: break-all; margin-bottom: 5px; color: #ecf0f1; }
+        .media-item .meta { font-size: 11px; color: #bdc3c7; }
+        .meta-separator { display: none; }
+        .media-meta { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+        .media-item .delete-btn { position: absolute; top: 8px; right: 8px; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; transition: background 0.2s; z-index: 10; }
+        .media-item .delete-btn:hover { background: #c0392b; }
+        .media-item .preview-btn { position: absolute; top: 8px; right: 36px; background: #3498db; color: white; border: none; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; transition: background 0.2s; z-index: 10; }
+        .media-item .preview-btn:hover { background: #2980b9; }
+ 
+        /* Mode Liste */
+        .media-grid.list-view { display: flex; flex-direction: column; gap: 8px; }
+        .media-grid.list-view .media-item { flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 20px; }
+        .media-grid.list-view .media-item:hover { transform: none; }
+        .media-grid.list-view .media-content { flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; }
+        .media-grid.list-view .media-item img, 
+        .media-grid.list-view .media-item video,
+        .media-grid.list-view .media-item iframe,
+        .media-grid.list-view .media-item .font-preview-box { width: 50px; height: 50px; min-width: 50px; margin: 0 20px 0 0; }
+        .media-grid.list-view .media-item.folder .folder-icon { font-size: 30px; width: 50px; height: 50px; min-width: 50px; margin: 0 20px 0 0; display: flex; align-items: center; justify-content: center; }
+        .media-grid.list-view .media-info { text-align: left; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+        .media-grid.list-view .media-meta { flex-direction: row; gap: 0; }
+        .media-grid.list-view .meta-separator { display: inline; color: #7f8c8d; }
+        .media-grid.list-view .delete-btn { position: static; margin-left: 5px; }
+        .media-grid.list-view .preview-btn { position: static; margin-left: auto; }
+        .media-grid.list-view .media-select-checkbox { position: static; margin-right: 15px; margin-top: 0; }
+ 
+        /* Boutons de bascule layout */
+        .layout-toggle-btn { background: #34495e; padding: 8px 12px; border-radius: 4px; border: 1px solid #34495e; color: white; cursor: pointer; }
+        .layout-toggle-btn.active { background: #3498db; border-color: #3498db; }
+
+        /* Visionneuse Lightbox */
+        .lightbox {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .lightbox.show {
+            display: flex;
+            opacity: 1;
+        }
+        .lightbox-close {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            color: #bdc3c7;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: color 0.2s;
+            user-select: none;
+            z-index: 1010;
+        }
+        .lightbox-close:hover {
+            color: white;
+        }
+        .lightbox-content {
+            max-width: 85%;
+            max-height: 80%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .lightbox-content img, .lightbox-content video {
+            max-width: 100%;
+            max-height: 70vh;
+            object-fit: contain;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border-radius: 4px;
+        }
+        .lightbox-content iframe {
+            width: 80vw;
+            height: 70vh;
+            border: none;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .lightbox-content audio {
+            width: 500px;
+            margin-bottom: 20px;
+        }
+        .lightbox-content .lightbox-font-box {
+            background: #2c3e50;
+            color: white;
+            border: 2px solid #34495e;
+            padding: 30px;
+            border-radius: 8px;
+            font-size: 48px;
+            text-align: center;
+            max-width: 600px;
+            word-wrap: break-word;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        #lightbox-caption {
+            margin-top: 15px;
+            color: #ecf0f1;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
     </style>
 </head>
 <body>
@@ -34,39 +157,104 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
     <div class="container">
-        <div class="filters">
-            <label for="filter-type">Type:</label>
-            <select id="filter-type" onchange="filterMedia()">
-                <option value="">Tous</option>
-                <option value="image">Image</option>
-                <option value="video">Vidéo</option>
-                <option value="audio">Audio</option>
-                <option value="html">HTML / Web</option>
-                <option value="font">Police</option>
-                <option value="other">Autre</option>
-            </select>
+        <div class="filters" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; background: #1a252f; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <!-- Recherche -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="search-media">Recherche :</label>
+                <input type="text" id="search-media" placeholder="Rechercher par nom..." oninput="filterMedia()" style="width: 200px; padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #34495e; color: white;">
+            </div>
 
-            <label for="filter-user">Utilisateur:</label>
-            <select id="filter-user" onchange="filterMedia()">
-                <option value="">Tous</option>
-                <!-- Options will be populated dynamically -->
-            </select>
+            <!-- Type -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="filter-type">Type :</label>
+                <select id="filter-type" onchange="filterMedia()">
+                    <option value="">Tous</option>
+                    <option value="image">Image</option>
+                    <option value="video">Vidéo</option>
+                    <option value="audio">Audio</option>
+                    <option value="html">HTML / Web</option>
+                    <option value="font">Police</option>
+                    <option value="other">Autre</option>
+                </select>
+            </div>
 
-            <label for="sort-by">Trier par:</label>
-            <select id="sort-by" onchange="filterMedia()">
-                <option value="uploadDate-desc">Date (plus récent)</option>
-                <option value="uploadDate-asc">Date (plus ancien)</option>
-                <option value="filename-asc">Nom (A-Z)</option>
-                <option value="filename-desc">Nom (Z-A)</option>
-            </select>
+            <!-- Utilisateur -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="filter-user">Auteur :</label>
+                <select id="filter-user" onchange="filterMedia()">
+                    <option value="">Tous</option>
+                </select>
+            </div>
 
-            <div id="font-preview-container" style="display: none; align-items: center; gap: 10px;">
+            <!-- Tri -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="sort-by">Tri :</label>
+                <select id="sort-by" onchange="filterMedia()">
+                    <option value="uploadDate-desc">Date (plus récent)</option>
+                    <option value="uploadDate-asc">Date (plus ancien)</option>
+                    <option value="filename-asc">Nom (A-Z)</option>
+                    <option value="filename-desc">Nom (Z-A)</option>
+                </select>
+            </div>
+
+            <!-- Commutateur Layout -->
+            <div style="display: flex; gap: 5px; margin-left: auto; align-items: center;">
+                <label>Affichage :</label>
+                <button type="button" class="layout-toggle-btn active" id="layout-grid-btn" onclick="setLayoutMode('grid')">🖼️ Vignettes</button>
+                <button type="button" class="layout-toggle-btn" id="layout-list-btn" onclick="setLayoutMode('list')">📝 Liste</button>
+            </div>
+
+            <!-- Actions de Sélection -->
+            <div id="selection-actions" style="display: flex; align-items: center; gap: 10px; margin-left: 10px;">
+                <button type="button" id="bulk-deselect-btn" class="layout-toggle-btn" onclick="clearSelection()" style="background: #34495e; border-color: #7f8c8d;" disabled>Annuler la sélection</button>
+                <button type="button" id="bulk-delete-btn" style="background: #e74c3c; font-weight: bold; border-radius: 4px; padding: 10px 15px;" onclick="bulkDeleteMedia()" disabled>🗑️ Supprimer la sélection (<span id="selected-count">0</span>)</button>
+            </div>
+
+            <!-- Actions de Chargement et d'Importation -->
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <!-- Bouton Charger -->
+                <div>
+                    <input type="file" id="media-upload-input" style="display: none;" onchange="uploadMedia()">
+                    <button type="button" onclick="document.getElementById('media-upload-input').click()" style="background: #27ae60; font-weight: bold; border: none; border-radius: 4px; padding: 10px 15px; color: white; cursor: pointer;" title="Charger un fichier image, vidéo, audio ou police local">➕ Charger un média</button>
+                </div>
+
+                <!-- Bouton PPTX -->
+                <div>
+                    <input type="file" id="pptx-upload-input" accept=".pptx" style="display: none;" onchange="importPptx()">
+                    <button type="button" onclick="document.getElementById('pptx-upload-input').click()" style="background: #9b59b6; font-weight: bold; border: none; border-radius: 4px; padding: 10px 15px; color: white; cursor: pointer; display: flex; align-items: center; gap: 5px;" title="Convertir et importer un diaporama PowerPoint (.pptx)">📊 Importer PPTX</button>
+                </div>
+
+                <!-- Bouton YouTube -->
+                <div>
+                    <button type="button" onclick="promptYoutubeImport()" style="background: #e67e22; font-weight: bold; border: none; border-radius: 4px; padding: 10px 15px; color: white; cursor: pointer; display: flex; align-items: center; gap: 5px;" title="Télécharger et importer une vidéo YouTube">🎥 Importer YouTube</button>
+                </div>
+            </div>
+
+            <!-- Font preview text input (hidden by default) -->
+            <div id="font-preview-container" style="display: none; align-items: center; gap: 10px; width: 100%; margin-top: 10px; border-top: 1px dashed #34495e; padding-top: 10px;">
                 <label for="font-preview-text">Aperçu police :</label>
-                <input type="text" id="font-preview-text" placeholder="Saisissez un texte..." oninput="updateFontPreviews()" value="AaBbYy 123">
+                <input type="text" id="font-preview-text" placeholder="Saisissez un texte..." oninput="updateFontPreviews()" value="AaBbYy 123" style="flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #34495e; color: white;">
+            </div>
+        </div>
+
+        <!-- Breadcrumbs pour dossiers PPTX -->
+        <div id="media-breadcrumbs" style="display: none; align-items: center; gap: 10px; margin-bottom: 15px; background: #1a252f; padding: 10px 15px; border-radius: 6px; border-left: 4px solid #9b59b6;">
+            <button type="button" onclick="exitFolder()" style="background: #34495e; padding: 5px 10px; font-size: 13px;">⬅️ Retour</button>
+            <span style="font-weight: bold; color: #ecf0f1; margin-left: 10px;">Dossier : <span id="current-folder-name" style="color: #9b59b6;"></span></span>
+        </div>
+
+        <!-- Zone de statut globale pour les imports (YouTube / PPTX) -->
+        <div id="global-import-status" style="display: none; align-items: center; gap: 15px; margin-bottom: 15px; background: #1a252f; padding: 15px; border-radius: 8px; border-left: 4px solid #e67e22;">
+            <div style="flex: 1;">
+                <span id="import-status-text" style="font-weight: bold; color: #ecf0f1;">Importation en cours...</span>
+                <div id="import-progress-container" style="display: none; width: 100%; height: 10px; background: #2c3e50; border-radius: 5px; margin-top: 10px; overflow: hidden; border: 1px solid #34495e;">
+                    <div id="import-progress-bar" style="width: 0%; height: 100%; background: #e67e22; transition: width 0.2s;"></div>
+                </div>
             </div>
         </div>
 
@@ -74,49 +262,156 @@
             <!-- Media items will be rendered here -->
         </div>
 
-        <div class="upload-section">
-            <h3>Télécharger un média</h3>
-            <input type="file" id="media-upload-input">
-            <button onclick="uploadMedia()">Télécharger</button>
+
+    </div>
+
+    <!-- Visionneuse Lightbox -->
+    <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
+        <span class="lightbox-close" onclick="closeLightbox(event)">&times;</span>
+        <div class="lightbox-content" onclick="event.stopPropagation()">
+            <div id="lightbox-media-container"></div>
+            <div id="lightbox-caption"></div>
         </div>
     </div>
 
     <script>
         const token = localStorage.getItem('pidyn_token');
         if (!token) window.location.href = '/';
-        const PREVIEW_AUTH = '?apiKey=ma_cle_secrete_123';
+        const role = localStorage.getItem('pidyn_role');
+        const username = localStorage.getItem('pidyn_username');
+        const PREVIEW_AUTH = `?token=${token}`;
 
-        function logout() { localStorage.removeItem('pidyn_token'); localStorage.removeItem('pidyn_role'); window.location.href = '/'; }
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
+
+        if (role !== 'admin') {
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('nav button[onclick*="/users"], nav button[onclick*="/systeme"], nav button[onclick*="/sites"]').forEach(b => b.style.display = 'none');
+            });
+        }
 
         let allMedia = [];
         let allUsers = [];
+        let selectedMediaIds = [];
+        let lastClickedIndex = -1;
+        let currentFilteredMedia = [];
+        let currentFolderId = null;
+
+        // Initialisation Socket pour le suivi des téléchargements
+        const socket = io({ auth: { token: token } });
+
+        socket.on('connect', () => {
+            console.log("[Socket] Connecté au serveur pour le suivi de progression");
+        });
+
+        socket.on('youtube-download-progress', (data) => {
+            const statusArea = document.getElementById('global-import-status');
+            const statusText = document.getElementById('import-status-text');
+            const progressContainer = document.getElementById('import-progress-container');
+            const progressBar = document.getElementById('import-progress-bar');
+            
+            if (statusArea && statusText && progressContainer && progressBar) {
+                statusArea.style.display = 'flex';
+                statusArea.style.borderLeftColor = '#e67e22';
+                progressContainer.style.display = 'block';
+                progressBar.style.width = data.progress + '%';
+                statusText.innerText = `Téléchargement YouTube : ${data.progress}%`;
+                if (parseFloat(data.progress) >= 100) {
+                    statusText.innerText = "Téléchargement YouTube terminé, finalisation de la vidéo...";
+                }
+            }
+        });
+
+        socket.on('youtube-download-complete', (data) => {
+            const statusArea = document.getElementById('global-import-status');
+            const statusText = document.getElementById('import-status-text');
+            const progressContainer = document.getElementById('import-progress-container');
+            
+            if (statusText) {
+                statusText.innerText = `Succès ! Vidéo "${data.filename}" importée.`;
+                statusText.style.color = '#27ae60';
+            }
+            if (progressContainer) progressContainer.style.display = 'none';
+            init(); // Rafraîchir les médias
+            setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 4000);
+        });
+
+        socket.on('youtube-download-error', (data) => {
+            const statusArea = document.getElementById('global-import-status');
+            const statusText = document.getElementById('import-status-text');
+            const progressContainer = document.getElementById('import-progress-container');
+            
+            if (statusText) {
+                statusText.innerText = `Échec de l'import : ${data.message}`;
+                statusText.style.color = '#e74c3c';
+            }
+            if (progressContainer) progressContainer.style.display = 'none';
+            setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 6000);
+        });
+
+        let layoutMode = localStorage.getItem('media_layout_mode') || 'grid';
 
         async function init() {
-            await fetchMedia();
-            await fetchUsers();
+            selectedMediaIds = [];
+            lastClickedIndex = -1;
+            try {
+                await fetchMedia();
+            } catch (e) {
+                console.error("Erreur lors du chargement des médias :", e);
+            }
+            try {
+                await fetchUsers();
+            } catch (e) {
+                console.warn("Erreur lors de la récupération des utilisateurs :", e);
+            }
             populateUserFilter();
+            setLayoutMode(layoutMode);
             filterMedia();
         }
 
         async function fetchMedia() {
             const res = await fetch('/api/admin/media', { headers: { 'Authorization': `Bearer ${token}` } });
-            allMedia = await res.json();
+            if (res.ok) {
+                allMedia = await res.json();
+            } else {
+                console.error("Impossible de récupérer la liste des médias.");
+            }
         }
 
         async function fetchUsers() {
             const res = await fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } });
-            allUsers = await res.json();
+            if (res.ok) {
+                allUsers = await res.json();
+            } else {
+                console.warn("Impossible de récupérer la liste des utilisateurs (droits insuffisants ?)");
+            }
         }
 
         function populateUserFilter() {
             const select = document.getElementById('filter-user');
             select.innerHTML = '<option value="">Tous</option>';
-            allUsers.forEach(user => {
+            
+            // Si allUsers est vide ou inaccessible, on extrait les auteurs à partir de allMedia
+            const users = allUsers.length > 0
+                ? allUsers.map(u => u.username)
+                : [...new Set(allMedia.map(m => m.uploadedBy))].filter(Boolean);
+
+            users.forEach(username => {
                 const option = document.createElement('option');
-                option.value = user.username;
-                option.textContent = user.username;
+                option.value = username;
+                option.textContent = username;
                 select.appendChild(option);
             });
+        }
+
+        function exitFolder() {
+            currentFolderId = null;
+            filterMedia();
         }
 
         function filterMedia() {
@@ -129,9 +424,64 @@
             const type = document.getElementById('filter-type').value;
             const user = document.getElementById('filter-user').value;
             const sortBy = document.getElementById('sort-by').value;
+            const search = document.getElementById('search-media').value.toLowerCase().trim();
 
             if (type) filtered = filtered.filter(item => item.type === type);
             if (user) filtered = filtered.filter(item => item.uploadedBy === user);
+
+            if (currentFolderId !== null) {
+                // On est à l'intérieur d'un dossier
+                const folderItem = allMedia.find(m => m.parentFolderId === currentFolderId);
+                const folderName = folderItem ? folderItem.parentFolderName : currentFolderId;
+                document.getElementById('current-folder-name').innerText = folderName;
+                document.getElementById('media-breadcrumbs').style.display = 'flex';
+
+                // Filtrer pour ne garder que les slides de ce dossier
+                filtered = filtered.filter(m => m.parentFolderId === currentFolderId);
+                if (search) filtered = filtered.filter(item => item.filename.toLowerCase().includes(search));
+            } else {
+                // On est à la racine
+                document.getElementById('media-breadcrumbs').style.display = 'none';
+
+                // Regrouper les slides par parentFolderId
+                const folderGroups = {};
+                const rootFiles = [];
+
+                filtered.forEach(item => {
+                    if (item.parentFolderId) {
+                        if (!folderGroups[item.parentFolderId]) {
+                            folderGroups[item.parentFolderId] = [];
+                        }
+                        folderGroups[item.parentFolderId].push(item);
+                    } else {
+                        rootFiles.push(item);
+                    }
+                });
+
+                // Créer des éléments virtuels de dossier
+                const folderItems = [];
+                for (const folderId in folderGroups) {
+                    const group = folderGroups[folderId];
+                    const first = group[0];
+                    folderItems.push({
+                        id: folderId,
+                        folderId: folderId,
+                        filename: first.parentFolderName || 'Dossier',
+                        uploadedBy: first.uploadedBy,
+                        uploadDate: first.uploadDate,
+                        type: 'folder',
+                        isFolder: true,
+                        childCount: group.length
+                    });
+                }
+
+                // Rassembler fichiers racine et dossiers virtuels
+                filtered = [...rootFiles, ...folderItems];
+
+                if (search) {
+                    filtered = filtered.filter(item => item.filename.toLowerCase().includes(search));
+                }
+            }
 
             // Afficher le champ de texte personnalisé si on filtre par police ou si "Tous" est sélectionné
             document.getElementById('font-preview-container').style.display = (!type || type === 'font') ? 'flex' : 'none';
@@ -144,6 +494,7 @@
                 return 0;
             });
 
+            currentFilteredMedia = filtered;
             renderMedia(filtered);
         }
 
@@ -154,14 +505,88 @@
             });
         }
 
+        function setLayoutMode(mode) {
+            layoutMode = mode;
+            localStorage.setItem('media_layout_mode', mode);
+            
+            const grid = document.getElementById('media-grid');
+            if (mode === 'list') {
+                grid.classList.add('list-view');
+                document.getElementById('layout-list-btn').classList.add('active');
+                document.getElementById('layout-grid-btn').classList.remove('active');
+            } else {
+                grid.classList.remove('list-view');
+                document.getElementById('layout-grid-btn').classList.add('active');
+                document.getElementById('layout-list-btn').classList.remove('active');
+            }
+        }
+
         function renderMedia(mediaItems) {
             const grid = document.getElementById('media-grid');
             grid.innerHTML = '';
             const previewText = document.getElementById('font-preview-text').value || "AaBbYy 123";
 
-            mediaItems.forEach(item => {
+            mediaItems.forEach((item, idx) => {
                 const div = document.createElement('div');
-                div.className = 'media-item';
+                const isSelected = selectedMediaIds.includes(item.id);
+
+                if (item.isFolder) {
+                    div.className = 'media-item folder';
+                    div.setAttribute('data-id', item.id);
+                    div.setAttribute('data-index', idx);
+                    
+                    div.addEventListener('click', (event) => {
+                        if (event.target.closest('.delete-btn')) return;
+                        currentFolderId = item.folderId;
+                        filterMedia();
+                    });
+                    
+                    const canDeleteFolder = (role === 'admin' || role === 'editor' || item.uploadedBy === username);
+                    div.innerHTML = `
+                        <div class="media-content">
+                            <div class="folder-icon">📁</div>
+                            <div class="media-info">
+                                <div class="filename">${item.filename}</div>
+                                <div class="media-meta">
+                                    <span class="meta">${item.childCount} diapositive${item.childCount > 1 ? 's' : ''}</span>
+                                    <span class="meta-separator">&nbsp;|&nbsp;</span>
+                                    <span class="meta">Par: ${item.uploadedBy}</span>
+                                </div>
+                            </div>
+                        </div>
+                        ${canDeleteFolder ? `<button class="delete-btn" onclick="event.stopPropagation(); deleteFolder('${item.folderId}')">×</button>` : ''}
+                    `;
+                    grid.appendChild(div);
+                    return;
+                }
+
+                div.className = 'media-item' + (isSelected ? ' selected' : '');
+                div.setAttribute('data-id', item.id);
+                div.setAttribute('data-index', idx);
+                
+                div.addEventListener('click', (event) => {
+                    // Ignorer le clic si la cible est un bouton ou élément interactif
+                    if (event.target.closest('.delete-btn') || 
+                        event.target.closest('.preview-btn') || 
+                        event.target.closest('audio') || 
+                        event.target.closest('video') && event.target.controls || 
+                        event.target.closest('iframe') || 
+                        event.target.closest('.media-select-checkbox')) {
+                        return;
+                    }
+                    toggleSelection(event, item.id, idx);
+                });
+
+                div.addEventListener('dblclick', (event) => {
+                    // Ignorer le double-clic si la cible est un bouton ou case à cocher
+                    if (event.target.closest('.delete-btn') || 
+                        event.target.closest('.preview-btn') || 
+                        event.target.closest('.media-select-checkbox')) {
+                        return;
+                    }
+                    showLightbox(item.id);
+                });
+
                 let preview = '';
                 const authenticatedUrl = item.url + PREVIEW_AUTH;
                 if (item.type === 'image') {
@@ -171,7 +596,7 @@
                 } else if (item.type === 'audio') {
                     preview = `<audio src="${authenticatedUrl}" controls></audio>`;
                 } else if (item.type === 'html') {
-                    preview = `<iframe src="${authenticatedUrl}" style="width:100%; height:100px; border:none;"></iframe>`;
+                    preview = `<iframe src="${authenticatedUrl}"></iframe>`;
                 } else if (item.type === 'svg') {
                     preview = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
                 } else if (item.type === 'font') {
@@ -182,21 +607,35 @@
                         style.textContent = `@font-face { font-family: "font-${item.id}"; src: url("${authenticatedUrl}"); }`;
                         document.head.appendChild(style);
                     }
-                    preview = `<div class="font-preview-box" style="font-family: 'font-${item.id}'; font-size: 24px; height: 100px; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap;">${previewText}</div>`;
+                    preview = `<div class="font-preview-box" style="font-family: 'font-${item.id}'; font-size: 24px; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap;">${previewText}</div>`;
                 } else if (item.type === 'json') {
-                    preview = `<span>JSON</span>`;
+                    preview = `<div class="font-preview-box" style="font-size: 24px; display: flex; align-items: center; justify-content: center;">JSON</div>`;
                 } else {
-                    preview = `<span>${item.type}</span>`;
+                    preview = `<div class="font-preview-box" style="font-size: 24px; display: flex; align-items: center; justify-content: center;">${item.type}</div>`;
                 }
+                
+                const canDeleteMedia = (role === 'admin' || role === 'editor' || item.uploadedBy === username);
+                const checkboxHtml = canDeleteMedia ? `<input type="checkbox" class="media-select-checkbox" data-id="${item.id}" ${isSelected ? 'checked' : ''} onclick="handleCheckboxClick(event, '${item.id}', ${idx})">` : '';
+
                 div.innerHTML = `
-                    <button class="delete-btn" onclick="deleteMedia('${item.id}')">×</button>
-                    ${preview}
-                    <div class="filename">${item.filename}</div>
-                    <div class="meta">Par: ${item.uploadedBy}</div>
-                    <div class="meta">Le: ${new Date(item.uploadDate).toLocaleDateString()}</div>
+                    ${checkboxHtml}
+                    <div class="media-content">
+                        ${preview}
+                        <div class="media-info">
+                            <div class="filename">${item.filename}</div>
+                            <div class="media-meta">
+                                <span class="meta">Par: ${item.uploadedBy}</span>
+                                <span class="meta-separator">&nbsp;|&nbsp;</span>
+                                <span class="meta">Le: ${new Date(item.uploadDate).toLocaleDateString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="preview-btn" onclick="event.stopPropagation(); showLightbox('${item.id}')" title="Visionner en grand">👁️</button>
+                    ${canDeleteMedia ? `<button class="delete-btn" onclick="event.stopPropagation(); deleteMedia('${item.id}')">×</button>` : ''}
                 `;
                 grid.appendChild(div);
             });
+            updateBulkDeleteButton();
         }
 
         async function uploadMedia() {
@@ -225,10 +664,315 @@
             }
         }
 
-        async function deleteMedia(id) {
-            if (!confirm('Êtes-vous sûr de vouloir supprimer ce média ?')) return;
+        async function promptYoutubeImport() {
+            const youtubeUrl = prompt("Veuillez saisir l'URL de la vidéo YouTube :");
+            if (!youtubeUrl) return;
 
-            const res = await fetch(`/api/admin/media/${id}`, { //
+            const statusArea = document.getElementById('global-import-status');
+            const statusText = document.getElementById('import-status-text');
+            const progressContainer = document.getElementById('import-progress-container');
+            const progressBar = document.getElementById('import-progress-bar');
+            
+            if (statusArea) {
+                statusArea.style.display = 'flex';
+                statusArea.style.borderLeftColor = '#e67e22';
+            }
+            if (progressContainer) progressContainer.style.display = 'block';
+            if (progressBar) progressBar.style.width = '0%';
+            if (statusText) {
+                statusText.innerText = 'Requête envoyée au serveur...';
+                statusText.style.color = '#f39c12';
+            }
+
+            try {
+                const res = await fetch('/api/admin/media/youtube', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'Authorization': `Bearer ${token}` 
+                    },
+                    body: JSON.stringify({ youtubeUrl })
+                });
+
+                if (res.ok) {
+                    if (statusText) {
+                        statusText.innerText = 'Téléchargement démarré en tâche de fond...';
+                        statusText.style.color = '#3498db';
+                    }
+                } else {
+                    const errText = await res.text();
+                    let errMsg = errText;
+                    try {
+                        const errJson = JSON.parse(errText);
+                        errMsg = errJson.message || errMsg;
+                    } catch (e) {}
+                    if (statusText) {
+                        statusText.innerText = 'Erreur serveur: ' + errMsg;
+                        statusText.style.color = '#e74c3c';
+                    }
+                    if (progressContainer) progressContainer.style.display = 'none';
+                    setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 5000);
+                }
+            } catch (e) {
+                console.error("Erreur lors de l'appel API YouTube:", e);
+                if (statusText) {
+                    statusText.innerText = 'Erreur réseau : vérifiez que le serveur est allumé.';
+                    statusText.style.color = '#e74c3c';
+                }
+                if (progressContainer) progressContainer.style.display = 'none';
+                setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 5000);
+            }
+        }
+
+        function importPptx() {
+            const input = document.getElementById('pptx-upload-input');
+            if (!input.files.length) return;
+
+            const file = input.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const statusArea = document.getElementById('global-import-status');
+            const statusText = document.getElementById('import-status-text');
+            const progressContainer = document.getElementById('import-progress-container');
+            const progressBar = document.getElementById('import-progress-bar');
+
+            if (statusArea) {
+                statusArea.style.display = 'flex';
+                statusArea.style.borderLeftColor = '#9b59b6';
+            }
+            if (progressContainer) {
+                progressContainer.style.display = 'block';
+            }
+            if (progressBar) {
+                progressBar.style.width = '0%';
+            }
+            if (statusText) {
+                statusText.innerText = "Téléversement du fichier PowerPoint...";
+                statusText.style.color = "#f39c12";
+            }
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/admin/import-pptx', true);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    if (progressBar) {
+                        progressBar.style.width = percentComplete + '%';
+                    }
+                    if (statusText) {
+                        statusText.innerText = `Téléversement du fichier : ${percentComplete}%`;
+                    }
+                    if (percentComplete === 100) {
+                        if (statusText) {
+                            statusText.innerText = "Conversion du PPTX en cours (LibreOffice + pdftocairo)... Veuillez patienter.";
+                        }
+                    }
+                }
+            };
+
+            xhr.onload = function() {
+                if (progressContainer) progressContainer.style.display = 'none';
+
+                if (xhr.status === 200) {
+                    try {
+                        const result = JSON.parse(xhr.responseText);
+                        if (statusText) {
+                            statusText.innerText = "Importation réussie ! Diaporama créé. Redirection...";
+                            statusText.style.color = "#27ae60";
+                        }
+                        input.value = ''; // Reset input
+                        setTimeout(() => {
+                            if (statusArea) statusArea.style.display = 'none';
+                            window.location.href = `/editor?id=${result.playlistId}`;
+                        }, 2000);
+                    } catch (e) {
+                        if (statusText) {
+                            statusText.innerText = "Erreur lors de la lecture du résultat de l'importation.";
+                            statusText.style.color = "#e74c3c";
+                        }
+                        setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 5000);
+                    }
+                } else {
+                    if (statusText) {
+                        statusText.innerText = "Erreur lors de l'importation : " + xhr.responseText;
+                        statusText.style.color = "#e74c3c";
+                    }
+                    setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 5000);
+                    input.value = '';
+                }
+            };
+
+            xhr.onerror = function() {
+                if (progressContainer) progressContainer.style.display = 'none';
+                if (statusText) {
+                    statusText.innerText = "Erreur de connexion avec le serveur.";
+                    statusText.style.color = "#e74c3c";
+                }
+                setTimeout(() => { if (statusArea) statusArea.style.display = 'none'; }, 5000);
+                input.value = '';
+            };
+
+            xhr.send(formData);
+        }
+
+        function toggleSelection(event, id, idx) {
+            const shiftKey = event.shiftKey;
+            
+            if (shiftKey && lastClickedIndex !== -1) {
+                const start = Math.min(lastClickedIndex, idx);
+                const end = Math.max(lastClickedIndex, idx);
+                const shouldSelect = selectedMediaIds.includes(currentFilteredMedia[lastClickedIndex].id);
+                
+                for (let i = start; i <= end; i++) {
+                    const item = currentFilteredMedia[i];
+                    if (!item) continue;
+                    const inSelection = selectedMediaIds.includes(item.id);
+                    if (shouldSelect && !inSelection) {
+                        selectedMediaIds.push(item.id);
+                    } else if (!shouldSelect && inSelection) {
+                        selectedMediaIds = selectedMediaIds.filter(x => x !== item.id);
+                    }
+                }
+            } else {
+                if (selectedMediaIds.includes(id)) {
+                    selectedMediaIds = selectedMediaIds.filter(x => x !== id);
+                } else {
+                    selectedMediaIds.push(id);
+                }
+                lastClickedIndex = idx;
+            }
+            
+            renderMedia(currentFilteredMedia);
+        }
+
+        function handleCheckboxClick(event, id, idx) {
+            event.stopPropagation();
+            toggleSelection(event, id, idx);
+        }
+
+        function clearSelection() {
+            selectedMediaIds = [];
+            lastClickedIndex = -1;
+            renderMedia(currentFilteredMedia);
+        }
+
+        function updateBulkDeleteButton() {
+            const countSpan = document.getElementById('selected-count');
+            const deleteBtn = document.getElementById('bulk-delete-btn');
+            const deselectBtn = document.getElementById('bulk-deselect-btn');
+            
+            countSpan.innerText = selectedMediaIds.length;
+            if (selectedMediaIds.length > 0) {
+                deleteBtn.removeAttribute('disabled');
+                deselectBtn.removeAttribute('disabled');
+            } else {
+                deleteBtn.setAttribute('disabled', 'true');
+                deselectBtn.setAttribute('disabled', 'true');
+            }
+        }
+
+        async function bulkDeleteMedia() {
+            const count = selectedMediaIds.length;
+            if (!confirm(`Êtes-vous sûr de vouloir supprimer les ${count} médias sélectionnés ?`)) return;
+
+            const statusElement = document.getElementById('youtube-status');
+            if (statusElement) {
+                statusElement.innerText = `Suppression de ${count} éléments en cours...`;
+                statusElement.style.color = '#f39c12';
+            }
+
+            try {
+                // Tenter une suppression normale
+                const results = await Promise.all(
+                    selectedMediaIds.map(async (id) => {
+                        const res = await fetch(`/api/admin/media/${id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        return { id, ok: res.ok, status: res.status, res };
+                    })
+                );
+
+                const successful = results.filter(r => r.ok).map(r => r.id);
+                const conflicts = [];
+                const failed = [];
+
+                for (const r of results) {
+                    if (!r.ok) {
+                        if (r.status === 409) {
+                            try {
+                                const data = await r.res.json();
+                                conflicts.push({ id: r.id, playlists: data.playlists });
+                            } catch (e) {
+                                failed.push(r.id);
+                            }
+                        } else {
+                            failed.push(r.id);
+                        }
+                    }
+                }
+
+                // S'il y a des conflits, on demande si l'utilisateur veut forcer la suppression
+                if (conflicts.length > 0) {
+                    const allPlaylists = [...new Set(conflicts.flatMap(c => c.playlists))];
+                    const confirmForce = confirm(
+                        `⚠️ Certains médias sélectionnés sont utilisés dans les diaporamas suivants :\n- ${allPlaylists.join('\n- ')}\n\nVoulez-vous forcer leur suppression ?`
+                    );
+                    
+                    if (confirmForce) {
+                        const forceIds = conflicts.map(c => c.id);
+                        const forceResults = await Promise.all(
+                            forceIds.map(async (id) => {
+                                const res = await fetch(`/api/admin/media/${id}?force=true`, {
+                                    method: 'DELETE',
+                                    headers: { 'Authorization': `Bearer ${token}` }
+                                });
+                                return { id, ok: res.ok };
+                            })
+                        );
+                        
+                        const forceSuccessful = forceResults.filter(r => r.ok).map(r => r.id);
+                        const forceFailed = forceResults.filter(r => !r.ok).map(r => r.id);
+                        
+                        const totalSuccess = successful.length + forceSuccessful.length;
+                        const totalFailed = failed.length + forceFailed.length;
+                        
+                        if (totalFailed > 0) {
+                            alert(`Suppression terminée. ${totalSuccess} réussis, ${totalFailed} échecs.`);
+                        } else {
+                            alert('Tous les médias sélectionnés ont été supprimés avec succès !');
+                        }
+                    } else {
+                        const totalSuccess = successful.length;
+                        const totalFailed = failed.length + conflicts.length;
+                        alert(`Suppression terminée. ${totalSuccess} réussis, ${totalFailed} ignorés ou en échec.`);
+                    }
+                } else {
+                    if (failed.length > 0) {
+                        alert(`Suppression terminée. ${successful.length} réussis, ${failed.length} échecs.`);
+                    } else {
+                        alert('Tous les médias sélectionnés ont été supprimés avec succès !');
+                    }
+                }
+
+                selectedMediaIds = [];
+                lastClickedIndex = -1;
+                await init();
+            } catch (err) {
+                console.error("Erreur lors de la suppression groupée :", err);
+                alert("Une erreur réseau est survenue lors de la suppression groupée.");
+            }
+        }
+
+        async function deleteMedia(id, force = false) {
+            const url = `/api/admin/media/${id}` + (force ? '?force=true' : '');
+            
+            if (!force && !confirm('Êtes-vous sûr de vouloir supprimer ce média ?')) return;
+
+            const res = await fetch(url, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -236,8 +980,117 @@
             if (res.ok) {
                 alert('Média supprimé avec succès!');
                 await init();
+            } else if (res.status === 409) {
+                try {
+                    const data = await res.json();
+                    if (data.error === 'in_use') {
+                        const confirmForce = confirm(
+                            `⚠️ Attention : Ce média est utilisé dans les diaporamas suivants :\n- ${data.playlists.join('\n- ')}\n\nVoulez-vous forcer la suppression ?`
+                        );
+                        if (confirmForce) {
+                            await deleteMedia(id, true);
+                        }
+                    } else {
+                        alert('Erreur : ' + data.message);
+                    }
+                } catch (e) {
+                    alert('Erreur lors de la suppression du média.');
+                }
             } else {
                 alert('Erreur lors de la suppression du média.');
+            }
+        }
+
+        async function deleteFolder(folderId, force = false) {
+            const url = `/api/admin/media/folder/${folderId}` + (force ? '?force=true' : '');
+            
+            if (!force && !confirm('Êtes-vous sûr de vouloir supprimer ce dossier PPTX et toutes ses slides ?')) return;
+
+            const res = await fetch(url, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (res.ok) {
+                alert('Dossier supprimé avec succès!');
+                if (currentFolderId === folderId) {
+                    currentFolderId = null;
+                }
+                await init();
+            } else if (res.status === 409) {
+                try {
+                    const data = await res.json();
+                    if (data.error === 'in_use') {
+                        const confirmForce = confirm(
+                            `⚠️ Attention : Ce dossier contient des diapositives utilisées dans les diaporamas suivants :\n- ${data.playlists.join('\n- ')}\n\nVoulez-vous forcer la suppression du dossier et de toutes ses diapositives ?`
+                        );
+                        if (confirmForce) {
+                            await deleteFolder(folderId, true);
+                        }
+                    } else {
+                        alert('Erreur : ' + data.message);
+                    }
+                } catch (e) {
+                    alert('Erreur lors de la suppression du dossier.');
+                }
+            } else {
+                alert('Erreur lors de la suppression du dossier.');
+            }
+        }
+
+        function showLightbox(id) {
+            const item = allMedia.find(m => String(m.id) === String(id));
+            if (!item) return;
+
+            const container = document.getElementById('lightbox-media-container');
+            const caption = document.getElementById('lightbox-caption');
+            const lightbox = document.getElementById('lightbox');
+
+            container.innerHTML = '';
+            caption.innerText = item.filename;
+
+            const authenticatedUrl = item.url + PREVIEW_AUTH;
+
+            if (item.type === 'image' || item.type === 'svg') {
+                container.innerHTML = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
+            } else if (item.type === 'video') {
+                container.innerHTML = `<video src="${authenticatedUrl}" controls autoplay></video>`;
+            } else if (item.type === 'audio') {
+                container.innerHTML = `<audio src="${authenticatedUrl}" controls autoplay></audio>`;
+            } else if (item.type === 'html') {
+                container.innerHTML = `<iframe src="${authenticatedUrl}"></iframe>`;
+            } else if (item.type === 'font') {
+                container.innerHTML = `<div class="lightbox-font-box" style="font-family: 'font-${item.id}';">AaBbCcDdEe 12345</div>`;
+            } else {
+                container.innerHTML = `<div style="padding: 50px; background: #2c3e50; border-radius: 8px; font-size: 24px;">Fichier de type ${item.type}</div>`;
+            }
+
+            lightbox.style.display = 'flex';
+            lightbox.offsetHeight; // force reflow
+            lightbox.classList.add('show');
+            
+            window.addEventListener('keydown', handleEscapeKey);
+        }
+
+        function closeLightbox(event) {
+            const lightbox = document.getElementById('lightbox');
+            lightbox.classList.remove('show');
+            
+            const video = lightbox.querySelector('video');
+            if (video) video.pause();
+            const audio = lightbox.querySelector('audio');
+            if (audio) audio.pause();
+
+            setTimeout(() => {
+                lightbox.style.display = 'none';
+            }, 300);
+            
+            window.removeEventListener('keydown', handleEscapeKey);
+        }
+
+        function handleEscapeKey(e) {
+            if (e.key === 'Escape') {
+                closeLightbox();
             }
         }
 

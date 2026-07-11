@@ -67,13 +67,29 @@ sudo apt-get install -y --no-install-recommends xserver-xorg x11-xserver-utils x
 
 # 1. Augmenter le SWAP à 1024Mo (Crucial pour éviter l'Error 4 sur Pi Lite)
 log_message "Augmentation de la taille du SWAP à 1024Mo..."
+sudo apt-get install -y dphys-swapfile
 sudo sed -i 's/^#*CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
 sudo dphys-swapfile setup
 sudo dphys-swapfile swapon
 sudo systemctl restart dphys-swapfile
 
-# 2. Optimisation GPU (128Mo minimum)
-sudo sed -i 's/^gpu_mem=.*/gpu_mem=128/' "$BOOT_DIR/config.txt" || echo "gpu_mem=128" | sudo tee -a "$BOOT_DIR/config.txt"
+# 1b. Désactiver l'alerte RAM < 1Go de Raspberry Pi OS (Spécifique Pi Zero)
+if [ -f "/usr/bin/chromium-browser" ]; then
+    sudo sed -i 's/line_warning 1024/#line_warning 1024/g' /usr/bin/chromium-browser 2>/dev/null
+fi
+
+# 2. Optimisation GPU (128Mo pour Pi 3)
+if grep -q "^#*gpu_mem=" "$BOOT_DIR/config.txt"; then
+    sudo sed -i 's/^#*gpu_mem=.*/gpu_mem=128/' "$BOOT_DIR/config.txt"
+else
+    echo "gpu_mem=128" | sudo tee -a "$BOOT_DIR/config.txt"
+fi
+
+# 2b. S'assurer que le driver KMS est activé (essentiel pour l'accélération matérielle)
+if ! grep -q "^dtoverlay=vc4-kms-v3d" "$BOOT_DIR/config.txt"; then
+    log_message "Activation du driver KMS (vc4-kms-v3d) dans config.txt..."
+    echo "dtoverlay=vc4-kms-v3d" | sudo tee -a "$BOOT_DIR/config.txt"
+fi
 
 # 3. Installation de polices
 if [ -d "$BOOT_DIR/fonts" ]; then
@@ -82,8 +98,9 @@ if [ -d "$BOOT_DIR/fonts" ]; then
     sudo fc-cache -f -v
 fi
 
-# Déterminer dynamiquement le binaire Chromium
-CHROMIUM_BIN=$(command -v chromium-browser || command -v chromium)
+# Déterminer le chemin vers le wrapper Chromium officiel (nécessaire pour charger les configurations d'accélération graphique de Pi OS)
+CHROMIUM_BIN="/usr/bin/chromium-browser"
+[ ! -f "$CHROMIUM_BIN" ] && CHROMIUM_BIN=$(command -v chromium-browser || command -v chromium)
 
 # 4. Préparer le dossier de l'application
 log_message "Préparation du dossier d'installation $INSTALL_DIR..."
@@ -120,34 +137,21 @@ sudo systemctl daemon-reload
 sudo systemctl enable pidyn-sync.service
 sudo systemctl restart pidyn-sync.service
 
-# 7. Configurer le démarrage automatique du navigateur en mode kiosque
-log_message "Configuration du démarrage automatique du navigateur en mode kiosque..."
-# Configuration spécifique pour Openbox (plus fiable)
-sudo mkdir -p /home/pi/.config/openbox
-sudo chown -R pi:pi /home/pi/.config
+# 7. Configurer le démarrage automatique via le script start_player
+log_message "Configuration du démarrage automatique du joueur via start_player.sh..."
 
-cat <<EOF | sudo tee /home/pi/.config/openbox/autostart > /dev/null
-# Désactiver la mise en veille et l'économiseur d'écran (X11)
-xset s off
-xset s noblank
-xset -dpms
-# Cacher le pointeur de la souris (plus efficace avec -grab pour les écrans tactiles)
-unclutter -idle 0.5 -root &
-# Nettoyer le profil Chrome pour éviter les corruptions de cache
-rm -rf /home/pi/chrome_profile && mkdir -p /home/pi/chrome_profile
-# Lancer Chromium sans barre d'erreur et en mode kiosque
-export CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
-export DISPLAY=:0
-$CHROMIUM_BIN --no-sandbox --disable-dev-shm-usage --noerrdialogs --disable-infobars --kiosk \
-  --allow-file-access-from-files --disable-features=Translate --autoplay-policy=no-user-gesture-required \
-  --user-data-dir="/home/pi/chrome_profile" --disk-cache-size=1 --media-cache-size=1 \
-  --disable-background-networking --disable-sync --no-first-run --disable-component-update \
-  --disable-gpu --disable-software-rasterizer --disable-gpu-compositing --js-flags="--max-old-space-size=256" \
-  "file://${INSTALL_DIR}/player.html" &
+# Création du dossier d'autostart si inexistant
+mkdir -p /home/pi/.config/autostart
+
+cat <<EOF > /home/pi/.config/autostart/pidyn.desktop
+[Desktop Entry]
+Type=Application
+Name=PiDyn Player
+Exec=/home/pi/pidyn/start_player.sh
 EOF
-sudo chown pi:pi /home/pi/.config/openbox/autostart
-sudo chmod +x /home/pi/.config/openbox/autostart
 
+chown pi:pi /home/pi/.config/autostart/pidyn.desktop
+chmod +x /home/pi/.config/autostart/pidyn.desktop
 # 8. Nettoyage et finalisation
 log_message "Configuration forcée de LightDM pour l'auto-login..."
 sudo groupadd -r autologin 2>/dev/null

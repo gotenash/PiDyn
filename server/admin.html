@@ -15,6 +15,11 @@
         #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: url('img/splashscreen.png') no-repeat center center; background-size: cover; z-index: 100; display: flex; align-items: center; justify-content: center; }
         #login-box { background: #1a252f; padding: 30px; border-radius: 15px; border: 2px solid #3498db; box-shadow: 0 10px 40px rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; gap: 15px; text-align: center; }
         h1, h2 { color: #3498db; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .stat-card { background: #34495e; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.15); transition: transform 0.2s, box-shadow 0.2s; }
+        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 8px 15px rgba(0,0,0,0.25); }
+        .stat-card h3 { margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #bdc3c7; }
+        .stat-card p { margin: 0; font-size: 2.2em; font-weight: bold; color: #3498db; }
     </style>
 </head>
 <script src="/socket.io/socket.io.js"></script>
@@ -24,7 +29,6 @@
 
     <div id="login-overlay">
         <div id="login-box">
-            <img src="img/logo_pidyn.jpg" alt="Logo PiDyn" style="width: 200px;">
             <h2 style="margin: 0;">Connexion PiDyn</h2>
             <input type="text" id="username" placeholder="Utilisateur" onkeydown="handleLoginKey(event)">
             <input type="password" id="password" placeholder="Mot de passe" onkeydown="handleLoginKey(event)">
@@ -44,6 +48,7 @@
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
+        <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
         <button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>
     </nav>
 
@@ -52,14 +57,30 @@
             <h2>Statistiques de Diffusion (Top 50)</h2>
             <button class="danger" onclick="resetAnalytics()">Réinitialiser les stats</button>
         </div>
-        <div style="display: flex; gap: 20px; margin-bottom: 20px;">
-            <div style="background: #34495e; padding: 15px; border-radius: 8px; flex: 1; text-align: center;">
+        <div class="stats-grid">
+            <div class="stat-card">
                 <h3>Écrans en ligne</h3>
-                <p id="online-screens-count" style="font-size: 2.5em; font-weight: bold; color: #2ecc71;">0</p>
+                <p id="online-screens-count" style="color: #2ecc71;">0</p>
             </div>
-            <div style="background: #34495e; padding: 15px; border-radius: 8px; flex: 1; text-align: center;">
+            <div class="stat-card">
                 <h3>Écrans hors ligne</h3>
-                <p id="offline-screens-count" style="font-size: 2.5em; font-weight: bold; color: #e74c3c;">0</p>
+                <p id="offline-screens-count" style="color: #e74c3c;">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Diaporamas</h3>
+                <p id="playlists-count">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Séquences</h3>
+                <p id="sequences-count">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Médiathèque</h3>
+                <p id="media-count">0</p>
+            </div>
+            <div class="stat-card" id="site-card">
+                <h3>Site</h3>
+                <p id="site-display" style="font-size: 1.5em; color: #f1c40f; padding-top: 8px;">Global</p>
             </div>
         </div>
         <div style="background: #1a252f; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
@@ -95,6 +116,8 @@
                 role = data.role;
                 localStorage.setItem('pidyn_token', token);
                 localStorage.setItem('pidyn_role', role);
+                localStorage.setItem('pidyn_username', data.username);
+                localStorage.setItem('pidyn_siteId', data.siteId || '');
                 checkAuth();
             } else alert('Identifiants incorrects');
         }
@@ -102,6 +125,8 @@
         function logout() {
             localStorage.removeItem('pidyn_token');
             localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
             location.reload();
         }
 
@@ -139,6 +164,10 @@
                     document.querySelectorAll('nav button:not([onclick="/"]):not([onclick*="/canteen"])').forEach(b => b.style.display = 'none');
                 }
 
+                if (role !== 'admin') {
+                    document.querySelectorAll('nav button[onclick*="/users"], nav button[onclick*="/systeme"], nav button[onclick*="/sites"]').forEach(b => b.style.display = 'none');
+                }
+
                 if (role === 'admin' || role === 'editor') {
                     document.getElementById('analytics-section').style.display = 'block';
                     setupSocket(); // Initialize socket for real-time updates
@@ -148,11 +177,49 @@
         }
 
         async function load() {
-            const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+            const headers = { 'Authorization': `Bearer ${token}` };
+            const res = await fetch('/api/admin/data', { headers });
             if (res.status === 403) return logout();
-            const { players } = await res.json();
+            const { players, playlists, sequences } = await res.json();
             
             updatePlayerCounts(players);
+            
+            // Count playlists
+            const plCount = Object.keys(playlists || {}).length;
+            document.getElementById('playlists-count').innerText = plCount;
+            
+            // Count sequences
+            const seqCount = Object.keys(sequences || {}).length;
+            document.getElementById('sequences-count').innerText = seqCount;
+
+            // Fetch media count
+            try {
+                const mediaRes = await fetch('/api/admin/media', { headers });
+                const mediaItems = await mediaRes.json();
+                document.getElementById('media-count').innerText = mediaItems.length;
+            } catch (e) {
+                console.error("Erreur comptage médias :", e);
+            }
+
+            // Display site info
+            const currentSiteId = localStorage.getItem('pidyn_siteId');
+            if (currentSiteId) {
+                try {
+                    const sitesRes = await fetch('/api/admin/sites', { headers });
+                    if (sitesRes.ok) {
+                        const sitesList = await sitesRes.json();
+                        const siteObj = sitesList.find(s => s.id === currentSiteId);
+                        document.getElementById('site-display').innerText = siteObj ? siteObj.name : currentSiteId;
+                    } else {
+                        document.getElementById('site-display').innerText = currentSiteId;
+                    }
+                } catch (e) {
+                    document.getElementById('site-display').innerText = currentSiteId;
+                }
+            } else {
+                document.getElementById('site-display').innerText = 'Global';
+            }
+            
             loadAnalytics();
         }
 
@@ -161,6 +228,7 @@
             let offlineCount = 0;
             for (let id in players) {
                 const p = players[id];
+                if (!id || id === 'undefined' || id === 'null') continue; // Ignorer les entrées mal formées
                 const isOnline = p.lastSeen && (new Date() - new Date(p.lastSeen) < 60000);
                 if (isOnline) {
                     onlineCount++;
