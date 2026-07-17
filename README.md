@@ -1,7 +1,7 @@
 # OmniSign - Dynamic Digital Signage System
 
 <p align="center">
-  <img src="img/logo_pidyn.jpg" alt="OmniSign Logo" width="300"/>
+  <img src="img/logo_omnisign.png" alt="OmniSign Logo" width="300"/>
 </p>
 ## English
 
@@ -10,7 +10,7 @@
 
 ### Preview
 <p align="center">
-  <img src="img/login_pidyn.jpg" alt="OmniSign Login" width="400"/><br>
+  <img src="img/login_omnisign.png" alt="OmniSign Login" width="400"/><br>
   <em>Secure Login Interface</em><br><br>
   <img src="img/pidyn_editor.jpg" alt="OmniSign Editor" width="800"/><br>
   <em>Multi-zone Slideshow Editor</em><br><br>
@@ -139,7 +139,7 @@ This project is licensed under the MIT License.
 # OmniSign - Système d'Affichage Dynamique
 
 <p align="center">
-  <img src="img/logo_pidyn.jpg" alt="Logo OmniSign" width="300"/>
+  <img src="img/logo_omnisign.png" alt="Logo OmniSign" width="300"/>
 </p>
 ## Français
 
@@ -148,7 +148,7 @@ This project is licensed under the MIT License.
 
 ### Aperçu
 <p align="center">
-  <img src="img/login_pidyn.jpg" alt="Connexion OmniSign" width="400"/><br>
+  <img src="img/login_omnisign.png" alt="Connexion OmniSign" width="400"/><br>
   <em>Interface de connexion sécurisée</em><br><br>
   <img src="img/pidyn_editor.jpg" alt="Éditeur OmniSign" width="800"/><br>
   <em>Éditeur de diaporamas multi-zones</em><br><br>
