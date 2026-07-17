@@ -11,9 +11,36 @@ const http = require('http');
 const execPromise = util.promisify(exec);
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
+// Tampon en mémoire pour les logs récents (recherche de bugs à distance)
+const logBuffer = [];
+const maxLogLines = 300;
+
 // Ajout de l'horodatage aux logs du client
 const originalLog = console.log;
-console.log = (...args) => originalLog(`[${new Date().toLocaleString()}]`, ...args);
+console.log = (...args) => {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    const formatted = `[${new Date().toLocaleString()}] ${msg}`;
+    originalLog(formatted);
+    logBuffer.push(formatted);
+    if (logBuffer.length > maxLogLines) logBuffer.shift();
+};
+
+const originalError = console.error;
+console.error = (...args) => {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    const formatted = `[${new Date().toLocaleString()}] ❌ ${msg}`;
+    originalError(formatted);
+    logBuffer.push(formatted);
+    if (logBuffer.length > maxLogLines) logBuffer.shift();
+};
+
+// Global exception handlers to prevent background crashes
+process.on('uncaughtException', (err) => {
+    console.error('🔥 [CRASH ÉVITÉ] Exception non gérée :', err.stack || err.message || err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 [CRASH ÉVITÉ] Promesse rejetée non gérée :', reason);
+});
 
 const homeDir = os.homedir();
 const uid = os.userInfo().uid || 1000;
@@ -385,6 +412,11 @@ socket.on('volume-change', (data) => {
     exec(`pactl set-sink-volume @DEFAULT_SINK@ ${vol}% || amixer sset 'Master' ${vol}% || amixer sset 'PCM' ${vol}% || amixer sset 'HDMI' ${vol}%`, () => {});
 });
 
+// Écouter la demande de logs de l'admin
+socket.on('request-logs', () => {
+    socket.emit('logs-response', { deviceId: DEVICE_ID, logs: logBuffer.join('\n') });
+});
+
 let lastScreenState = null;
 socket.on('screen-command', (data) => {
     const action = data.action; // 'on' ou 'off'
@@ -629,6 +661,9 @@ const localServer = http.createServer(async (req, res) => {
 
             const chunksize = (end - start) + 1;
             const fileStream = fs.createReadStream(filePath, { start, end });
+            fileStream.on('error', (streamErr) => {
+                console.error(`⚠️ Erreur de flux de lecture (206) :`, streamErr.message);
+            });
             const head = {
                 'Content-Range': `bytes ${start}-${end}/${fileSize}`,
                 'Accept-Ranges': 'bytes',
@@ -644,7 +679,11 @@ const localServer = http.createServer(async (req, res) => {
                 'Accept-Ranges': 'bytes',
             };
             res.writeHead(200, head);
-            fs.createReadStream(filePath).pipe(res);
+            const fileStream = fs.createReadStream(filePath);
+            fileStream.on('error', (streamErr) => {
+                console.error(`⚠️ Erreur de flux de lecture (200) :`, streamErr.message);
+            });
+            fileStream.pipe(res);
         }
     } catch (err) {
         res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });

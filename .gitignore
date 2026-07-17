@@ -5613,3 +5613,5 @@ client_pi/sync-engine.js.bak
 server/public/media/zip_extract_1783798480873_disneyland/Disneyland.otf
 server/public/media/1783798513582.png
 server/public/media/1783798503234.mp4
+server/bak/pidyn.sqlite.bak
+server/db.json.bak

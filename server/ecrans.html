@@ -155,6 +155,8 @@
             background: #3498db !important;
         }
     </style>
+    <link rel="stylesheet" href="/assets/theme.css">
+    <script src="/assets/theme.js"></script>
 </head>
 <script src="/socket.io/socket.io.js"></script>
 <body>
@@ -179,7 +181,7 @@
     <section id="players-section">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
             <h2 style="margin:0;">Écrans Connectés</h2>
-            <div class="view-mode-toggle" style="display:flex; gap:5px; background:#1a252f; border:1px solid #34495e; padding:3px; border-radius:6px;">
+            <div class="view-mode-toggle settings-box" style="display:flex; gap:5px; padding:3px; border-radius:6px;">
                 <button id="view-vignettes-btn" onclick="setViewMode('vignettes')" style="padding:6px 12px; font-size:13px; background:none;">🎴 Vignettes</button>
                 <button id="view-table-btn" onclick="setViewMode('table')" style="padding:6px 12px; font-size:13px; background:none;">📋 Tableau</button>
             </div>
@@ -196,7 +198,7 @@
 
     <section id="groups-section">
         <h2>Gestion des Groupes</h2>
-        <div style="background:#1a252f; padding:15px; border-radius:8px; margin-bottom:15px;">
+        <div class="settings-box" style="padding:15px; border-radius:8px; margin-bottom:15px;">
             <div style="display:flex; gap:10px; margin-bottom:10px;">
                 <input type="text" id="group-name" placeholder="Nom du groupe (ex: Accueil, Cantine...)" style="flex:1">
                 <button onclick="saveGroup()">+ Créer le groupe</button>
@@ -207,7 +209,7 @@
 
     <section id="group-assign-section">
         <h2>Assignation Groupée</h2>
-        <div style="background:#1a252f; padding:15px; border-radius:8px;">
+        <div class="settings-box" style="padding:15px; border-radius:8px;">
             <div style="display:flex; gap:10px; align-items:center;">
                 <label>Groupe :</label>
                 <select id="assign-group-select" style="flex:1"></select>
@@ -220,7 +222,7 @@
 
     <section>
         <h2>Messages Flash / Alertes</h2>
-        <div style="background:#1a252f; padding:15px; border-radius:8px; margin-bottom:15px;">
+        <div class="settings-box" style="padding:15px; border-radius:8px; margin-bottom:15px;">
             <div style="display:flex; gap:10px; margin-bottom:10px;">
                 <input type="text" id="alert-text" placeholder="Message à diffuser..." style="flex:3">
                 <select id="alert-type" style="flex:1">
@@ -266,6 +268,14 @@
         function setupSocket() {
             socket = io({ auth: { token } });
             socket.on('admin-player-status', (data) => load());
+            socket.on('admin-logs-response', (data) => {
+                if (window.activeLogsDeviceId && data.deviceId === window.activeLogsDeviceId) {
+                    if (window.logsTimeout) clearTimeout(window.logsTimeout);
+                    const body = document.getElementById('logs-modal-body');
+                    body.textContent = data.logs || "Aucun log reçu ou historique vide.";
+                    body.scrollTop = body.scrollHeight;
+                }
+            });
             socket.on('screenshot-taken', (data) => {
                 // Mettre à jour l'image de la vignette dans la grille en temps réel
                 const card = document.querySelector(`.player-card[data-id="${data.deviceId}"]`);
@@ -368,6 +378,7 @@
                             <button class="secondary" title="Prendre une capture" onclick="takeScreenshot('${id}')">📸</button>
                             <button class="secondary" title="Forcer Synchro" onclick="forceSync('${id}')">🔄</button>
                             <button class="secondary" title="Vider Cache" onclick="clearCache('${id}')">🧹</button>
+                            <button class="secondary" title="Voir les logs" onclick="showLogsModal('${id}', '${p.name.replace(/'/g, "\\'")}')">📋</button>
                             <button class="secondary" title="Allumer l'écran" onclick="toggleScreen('${id}', 'on')">💡</button>
                             <button class="secondary" title="Éteindre l'écran (Veille)" onclick="toggleScreen('${id}', 'off')">🌙</button>
                             <button class="secondary" title="Redémarrer le service" onclick="restartScreen('${id}')">⚙️</button>
@@ -465,6 +476,7 @@
                             <button class="secondary" title="Prendre une capture" onclick="takeScreenshot('${id}')">📸 Capture</button>
                             <button class="secondary" title="Forcer Synchro" onclick="forceSync('${id}')">🔄 Synchro</button>
                             <button class="secondary" title="Vider Cache" onclick="clearCache('${id}')">🧹 Cache</button>
+                            <button class="secondary" title="Voir les logs" onclick="showLogsModal('${id}', '${p.name.replace(/'/g, "\\'")}')">📋 Logs</button>
                             <button class="secondary" title="Allumer l'écran" onclick="toggleScreen('${id}', 'on')" style="background:#27ae60;">💡 Allumer</button>
                             <button class="secondary" title="Éteindre l'écran" onclick="toggleScreen('${id}', 'off')" style="background:#7f8c8d;">🌙 Veille</button>
                             <button class="secondary" title="Redémarrer le service" onclick="restartScreen('${id}')" style="background:#d35400;">⚙️ Relancer</button>
@@ -503,7 +515,7 @@
                 Object.keys(players).map(id => `<option value="${id}">${players[id].name}</option>`).join('');
 
             document.getElementById('groups-list').innerHTML = groups.map(g => `
-                <div style="background:#34495e; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                <div class="list-item" style="padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                     <span><strong>${g.name}</strong></span>
                     <div style="display:flex; gap:5px;">
                         <button class="secondary" onclick="captureGroup('${g.id}')">📸 Capture</button>
@@ -595,7 +607,7 @@
             const res = await fetch('/api/admin/alerts', { headers: { 'Authorization': `Bearer ${token}` } });
             const alerts = await res.json();
             document.getElementById('alerts-list').innerHTML = alerts.map(a => `
-                <div style="background:#34495e; padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                <div class="list-item" style="padding:10px; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                     <span><strong>[${a.targetDeviceId || 'TOUS'}]</strong> ${getAlertIcon(a.type)} ${a.text}</span>
                     <button class="danger" onclick="deleteAlert(${a.id})">Arrêter</button>
                 </div>`).join('');
@@ -635,9 +647,65 @@
             }
         }
 
+        // --- GESTION VISUELLE DES LOGS ---
+        window.activeLogsDeviceId = null;
+        window.logsTimeout = null;
+
+        function showLogsModal(deviceId, name) {
+            window.activeLogsDeviceId = deviceId;
+            document.getElementById('logs-modal-title').textContent = `Logs en temps réel - ${name || deviceId}`;
+            const body = document.getElementById('logs-modal-body');
+            body.textContent = "⏳ Demande des logs en cours au client...";
+            body.scrollTop = body.scrollHeight;
+            document.getElementById('logs-modal').style.display = 'flex';
+
+            // Émettre l'événement de demande de logs via socket
+            socket.emit('admin-request-logs', { deviceId });
+
+            if (window.logsTimeout) clearTimeout(window.logsTimeout);
+            // Timeout de sécurité si le client ne répond pas (10 secondes)
+            window.logsTimeout = setTimeout(() => {
+                if (body.textContent === "⏳ Demande des logs en cours au client...") {
+                    body.textContent = "❌ L'afficheur n'a pas répondu à la demande de logs. Assurez-vous qu'il est connecté et en ligne.";
+                }
+            }, 10000);
+        }
+
+        function closeLogsModal() {
+            document.getElementById('logs-modal').style.display = 'none';
+            window.activeLogsDeviceId = null;
+            if (window.logsTimeout) clearTimeout(window.logsTimeout);
+        }
+
+        function refreshCurrentLogs() {
+            if (window.activeLogsDeviceId) {
+                const titleText = document.getElementById('logs-modal-title').textContent;
+                const name = titleText.includes(' - ') ? titleText.split(' - ')[1] : window.activeLogsDeviceId;
+                showLogsModal(window.activeLogsDeviceId, name);
+            }
+        }
+
         setupSocket();
         load();
     </script>
+
+    <!-- Modal pour les logs -->
+    <div id="logs-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 3000; align-items: center; justify-content: center;">
+        <div style="background: var(--bg-secondary); border: 2px solid var(--accent-color); border-radius: 8px; width: 85%; max-width: 900px; height: 80vh; display: flex; flex-direction: column; box-shadow: 0 5px 25px rgba(0,0,0,0.5); overflow: hidden;">
+            <div style="padding: 15px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: var(--bg-tertiary);">
+                <h3 id="logs-modal-title" style="margin: 0; color: var(--text-primary);">Logs de l'afficheur</h3>
+                <button onclick="closeLogsModal()" style="background: #e74c3c; color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px;">&times;</button>
+            </div>
+            <div style="padding: 15px; flex-grow: 1; overflow: hidden; display: flex; flex-direction: column; background: #1e1e1e;">
+                <pre id="logs-modal-body" style="background: #1e1e1e; color: #d4d4d4; padding: 15px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; flex-grow: 1; margin: 0; outline: none; text-align: left;"></pre>
+            </div>
+            <div style="padding: 15px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px; background: var(--bg-tertiary);">
+                <button id="logs-modal-refresh" onclick="refreshCurrentLogs()" class="secondary" style="padding: 8px 15px; cursor: pointer;">🔄 Rafraîchir</button>
+                <button onclick="closeLogsModal()" style="padding: 8px 15px; cursor: pointer;">Fermer</button>
+            </div>
+        </div>
+    </div>
+
     <footer style="text-align: center; margin-top: 40px; padding: 20px; font-size: 12px; color: #7f8c8d; border-top: 1px solid #34495e;">
         OmniSign est sous <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: #3498db; text-decoration: none;">licence MIT</a> - Auteur : <a href="https://github.com/gotenash" target="_blank" style="color: #3498db; text-decoration: none;">gotenash</a>
     </footer>

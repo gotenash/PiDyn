@@ -21,6 +21,8 @@
         .stat-card h3 { margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #bdc3c7; }
         .stat-card p { margin: 0; font-size: 2.2em; font-weight: bold; color: #3498db; }
     </style>
+    <link rel="stylesheet" href="/assets/theme.css">
+    <script src="/assets/theme.js"></script>
 </head>
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -83,7 +85,7 @@
                 <p id="site-display" style="font-size: 1.5em; color: #f1c40f; padding-top: 8px;">Global</p>
             </div>
         </div>
-        <div style="background: #1a252f; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+        <div class="settings-box" style="padding: 15px; border-radius: 8px; margin-bottom: 15px;">
             <canvas id="analytics-chart" style="width: 100%; max-height: 250px;"></canvas>
         </div>
         <div id="analytics-list">
@@ -286,6 +288,11 @@
         function renderAnalyticsChart(data) {
             const ctx = document.getElementById('analytics-chart').getContext('2d');
             if (analyticsChart) analyticsChart.destroy();
+            
+            const theme = localStorage.getItem('theme') || 'dark';
+            const textColor = theme === 'light' ? '#2c3e50' : 'white';
+            const gridColor = theme === 'light' ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+
             analyticsChart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -303,13 +310,29 @@
                 options: {
                     responsive: true,
                     scales: {
-                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: 'white' } },
-                        x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: 'white' } }
+                        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } },
+                        x: { grid: { color: gridColor }, ticks: { color: textColor } }
                     },
-                    plugins: { legend: { labels: { color: 'white' } } }
+                    plugins: { legend: { labels: { color: textColor } } }
                 }
             });
         }
+
+        // Écouter le changement de thème en direct pour mettre à jour les couleurs du graphique
+        window.addEventListener('theme-changed', (e) => {
+            if (analyticsChart) {
+                const theme = e.detail.theme;
+                const textColor = theme === 'light' ? '#2c3e50' : 'white';
+                const gridColor = theme === 'light' ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+
+                analyticsChart.options.scales.x.ticks.color = textColor;
+                analyticsChart.options.scales.x.grid.color = gridColor;
+                analyticsChart.options.scales.y.ticks.color = textColor;
+                analyticsChart.options.scales.y.grid.color = gridColor;
+                analyticsChart.options.plugins.legend.labels.color = textColor;
+                analyticsChart.update();
+            }
+        });
 
         async function resetAnalytics() {
             if (!confirm("Voulez-vous vraiment effacer tout l'historique des statistiques ?")) return;

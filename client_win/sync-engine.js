@@ -9,9 +9,36 @@ const util = require('util');
 const execPromise = util.promisify(exec);
 const isWin = os.platform() === 'win32';
 
+// Tampon en mémoire pour les logs récents (recherche de bugs à distance)
+const logBuffer = [];
+const maxLogLines = 300;
+
 // Ajout de l'horodatage aux logs du client
 const originalLog = console.log;
-console.log = (...args) => originalLog(`[${new Date().toLocaleString()}]`, ...args);
+console.log = (...args) => {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    const formatted = `[${new Date().toLocaleString()}] ${msg}`;
+    originalLog(formatted);
+    logBuffer.push(formatted);
+    if (logBuffer.length > maxLogLines) logBuffer.shift();
+};
+
+const originalError = console.error;
+console.error = (...args) => {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
+    const formatted = `[${new Date().toLocaleString()}] ❌ ${msg}`;
+    originalError(formatted);
+    logBuffer.push(formatted);
+    if (logBuffer.length > maxLogLines) logBuffer.shift();
+};
+
+// Global exception handlers to prevent background crashes
+process.on('uncaughtException', (err) => {
+    console.error('🔥 [CRASH ÉVITÉ] Exception non gérée :', err.stack || err.message || err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 [CRASH ÉVITÉ] Promesse rejetée non gérée :', reason);
+});
 
 const SERVER_URL = (process.env.PIDYN_SERVER_URL && process.env.PIDYN_SERVER_URL !== "undefined") ? process.env.PIDYN_SERVER_URL : 'http://localhost:3000';
 const API_KEY = (process.env.PIDYN_API_KEY && process.env.PIDYN_API_KEY !== "undefined") ? process.env.PIDYN_API_KEY : 'ma_cle_secrete_123';
@@ -216,6 +243,11 @@ socket.on('connect', async () => {
 
 socket.on('playlist-updated', async (playlistData) => {
     await syncPlaylist(playlistData);
+});
+
+// Écouter la demande de logs de l'admin
+socket.on('request-logs', () => {
+    socket.emit('logs-response', { deviceId: DEVICE_ID, logs: logBuffer.join('\n') });
 });
 
 socket.on('screen-command', (data) => {

@@ -675,6 +675,7 @@ const checkRole = (roles) => (req, res, next) => {
 
 app.use(express.json());
 app.use('/img', express.static(path.join(__dirname, 'img')));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 app.use('/media', authMiddleware, express.static(MEDIA_DIR));
 
 // Route par défaut pour servir l'interface d'administration
@@ -2184,6 +2185,13 @@ io.on('connection', async (socket) => {
     // Autoriser les connexions provenant de l'interface d'administration (Admin/Editor)
     if (socket.user) {
         console.log(`[SOCKET] Interface Admin connectée (Utilisateur: ${socket.user.username})`);
+        
+        // Relayer les demandes de logs de l'admin
+        socket.on('admin-request-logs', (data) => {
+            console.log(`[SOCKET] Demande de logs reçue de l'admin pour le client ${data.deviceId}`);
+            io.to(data.deviceId).emit('request-logs');
+        });
+        
         return; // Les admins n'ont pas besoin des listeners spécifiques aux "Players" ci-dessous
     }
 
@@ -2229,6 +2237,11 @@ io.on('connection', async (socket) => {
                 io.emit('screenshot-taken', data);
             })
             .catch(err => console.error("Error saving player screenshot:", err));
+    });
+
+    socket.on('logs-response', (data) => {
+        console.log(`[SOCKET] Logs reçus du client ${data.deviceId}, relais vers l'admin`);
+        io.emit('admin-logs-response', data);
     });
 
     // Gérer les mises à jour de statut de téléchargement
