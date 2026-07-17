@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PiDyn - Paramètres Système</title>
+    <title>OmniSign - Paramètres Système</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
         section { background: #1a252f; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); margin-bottom: 20px; }
@@ -13,7 +13,7 @@
 </head>
 <body>
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>PiDyn - Paramètres Système</h1>
+        <h1>OmniSign - Paramètres Système</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
@@ -58,6 +58,32 @@
                 <label>Adresse de notification (Destinataire)</label>
                 <input type="email" id="set-notification-email" placeholder="votre@email.com">
             </div>
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                <input type="checkbox" id="set-email-notifications-enabled" style="width: auto; margin: 0;">
+                <label for="set-email-notifications-enabled" style="cursor: pointer; font-weight: bold;">Activer les notifications courriel</label>
+            </div>
+            <div id="notification-details" style="padding-left: 20px; border-left: 2px solid #3498db; margin-bottom: 15px; transition: opacity 0.3s ease;">
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-notify-playlist-change" style="width: auto; margin: 0;">
+                    <label for="set-notify-playlist-change" style="cursor: pointer;">Alerte sur changement/publication de diaporama</label>
+                </div>
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-notify-player-offline" style="width: auto; margin: 0;">
+                    <label for="set-notify-player-offline" style="cursor: pointer;">Alerte sur écran déconnecté (Hors-ligne)</label>
+                </div>
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px; padding-left: 25px;">
+                    <label style="margin: 0; font-size: 14px;">Délai d'inactivité avant alerte (minutes) :</label>
+                    <input type="number" id="set-offline-alert-delay" style="width: 80px; margin: 0; padding: 4px;" min="1" max="1440">
+                </div>
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-notify-player-online" style="width: auto; margin: 0;">
+                    <label for="set-notify-player-online" style="cursor: pointer;">Alerte sur écran reconnecté (Rétablissement)</label>
+                </div>
+                <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-notify-tech-alert" style="width: auto; margin: 0;">
+                    <label for="set-notify-tech-alert" style="cursor: pointer;">Alerte technique (Erreurs de synchronisation média)</label>
+                </div>
+            </div>
             <div style="display: flex; gap: 10px; margin-bottom: 15px;">
                 <button onclick="saveSettings()" style="flex: 2;">Enregistrer les paramètres</button>
                 <button class="secondary" onclick="testEmail()" style="flex: 1; background: #9b59b6;">📧 Tester</button>
@@ -69,6 +95,18 @@
             <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
                 <input type="checkbox" id="set-disable-debug" style="width: auto; margin: 0;">
                 <label for="set-disable-debug" style="cursor: pointer;">Désactiver les logs techniques (Debug) sur les players</label>
+            </div>
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                <input type="checkbox" id="set-show-offline-alert" style="width: auto; margin: 0;">
+                <label for="set-show-offline-alert" style="cursor: pointer;">Afficher l'alerte sur écran (Serveur indisponible / Prise débranchée)</label>
+            </div>
+            <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                <input type="checkbox" id="set-periodic-screenshot-enabled" style="width: auto; margin: 0;">
+                <label for="set-periodic-screenshot-enabled" style="cursor: pointer; font-weight: bold;">Activer la capture d'écran périodique automatique</label>
+            </div>
+            <div id="screenshot-interval-container" style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px; padding-left: 25px; transition: opacity 0.3s ease;">
+                <label style="margin: 0; font-size: 14px;">Intervalle de capture (minutes) :</label>
+                <input type="number" id="set-periodic-screenshot-interval" style="width: 80px; margin: 0; padding: 4px;" min="1" max="1440" value="5">
             </div>
         </div>
     </section>
@@ -98,6 +136,7 @@
     <script>
         let token = localStorage.getItem('pidyn_token');
         let role = localStorage.getItem('pidyn_role');
+        let originalJwtSecret = '';
 
         if (!token || role !== 'admin') { alert("Accès réservé aux administrateurs"); window.location.href = '/'; }
 
@@ -111,8 +150,13 @@
 
         async function load() {
             const res = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (res.status === 401) {
+                logout();
+                return;
+            }
             const { settings } = await res.json();
             if (settings) {
+                originalJwtSecret = settings.jwtSecret;
                 document.getElementById('set-jwt-secret').value = settings.jwtSecret;
                 document.getElementById('set-api-key').value = settings.apiKey;
                 document.getElementById('set-splash-url').value = settings.splashScreenUrl;
@@ -120,12 +164,49 @@
                 document.getElementById('set-sleep-time').value = settings.screenSleepTime;
                 document.getElementById('set-disable-logs').checked = settings.disableClientLogs === 'true';
                 document.getElementById('set-disable-debug').checked = settings.disableDebugLogs === 'true';
+                document.getElementById('set-show-offline-alert').checked = settings.showOfflineAlert !== 'false';
+                
+                const screenshotEnabled = settings.periodicScreenshotEnabled === 'true';
+                document.getElementById('set-periodic-screenshot-enabled').checked = screenshotEnabled;
+                document.getElementById('set-periodic-screenshot-interval').value = settings.periodicScreenshotInterval || '5';
+                document.getElementById('screenshot-interval-container').style.opacity = screenshotEnabled ? '1' : '0.4';
+                document.getElementById('screenshot-interval-container').style.pointerEvents = screenshotEnabled ? 'auto' : 'none';
+
                 document.getElementById('set-smtp-host').value = settings.smtpHost || '';
                 document.getElementById('set-smtp-port').value = settings.smtpPort || '587';
                 document.getElementById('set-smtp-user').value = settings.smtpUser || '';
                 document.getElementById('set-smtp-pass').value = settings.smtpPass || '';
                 document.getElementById('set-notification-email').value = settings.notificationEmail || '';
+                
+                const enabled = settings.emailNotificationsEnabled === 'true';
+                document.getElementById('set-email-notifications-enabled').checked = enabled;
+                document.getElementById('set-notify-playlist-change').checked = settings.notifyPlaylistChange === 'true';
+                document.getElementById('set-notify-player-offline').checked = settings.notifyPlayerOffline === 'true';
+                document.getElementById('set-notify-player-online').checked = settings.notifyPlayerOnline === 'true';
+                document.getElementById('set-notify-tech-alert').checked = settings.notifyTechAlert === 'true';
+                document.getElementById('set-offline-alert-delay').value = settings.offlineAlertDelay || '15';
+                
+                document.getElementById('notification-details').style.opacity = enabled ? '1' : '0.4';
+                document.getElementById('notification-details').style.pointerEvents = enabled ? 'auto' : 'none';
             }
+            
+            // Attach event listener once
+            if (!window.hasNotificationListener) {
+                window.hasNotificationListener = true;
+                document.getElementById('set-email-notifications-enabled').addEventListener('change', (e) => {
+                    document.getElementById('notification-details').style.opacity = e.target.checked ? '1' : '0.4';
+                    document.getElementById('notification-details').style.pointerEvents = e.target.checked ? 'auto' : 'none';
+                });
+            }
+
+            if (!window.hasScreenshotListener) {
+                window.hasScreenshotListener = true;
+                document.getElementById('set-periodic-screenshot-enabled').addEventListener('change', (e) => {
+                    document.getElementById('screenshot-interval-container').style.opacity = e.target.checked ? '1' : '0.4';
+                    document.getElementById('screenshot-interval-container').style.pointerEvents = e.target.checked ? 'auto' : 'none';
+                });
+            }
+
             loadCookiesStatus();
         }
 
@@ -144,21 +225,36 @@
             const screenSleepTime = document.getElementById('set-sleep-time').value;
             const disableClientLogs = document.getElementById('set-disable-logs').checked;
             const disableDebugLogs = document.getElementById('set-disable-debug').checked;
+            const showOfflineAlert = document.getElementById('set-show-offline-alert').checked;
+            const periodicScreenshotEnabled = document.getElementById('set-periodic-screenshot-enabled').checked;
+            const periodicScreenshotInterval = document.getElementById('set-periodic-screenshot-interval').value;
             const smtpHost = document.getElementById('set-smtp-host').value;
             const smtpPort = document.getElementById('set-smtp-port').value;
             const smtpUser = document.getElementById('set-smtp-user').value;
             const smtpPass = document.getElementById('set-smtp-pass').value;
             const notificationEmail = document.getElementById('set-notification-email').value;
+            const emailNotificationsEnabled = document.getElementById('set-email-notifications-enabled').checked;
+            const notifyPlaylistChange = document.getElementById('set-notify-playlist-change').checked;
+            const notifyPlayerOffline = document.getElementById('set-notify-player-offline').checked;
+            const notifyPlayerOnline = document.getElementById('set-notify-player-online').checked;
+            const notifyTechAlert = document.getElementById('set-notify-tech-alert').checked;
+            const offlineAlertDelay = document.getElementById('set-offline-alert-delay').value;
             
             if (!confirm("Appliquer ?")) return;
             const res = await fetch('/api/admin/settings', {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ jwtSecret, apiKey, splashScreenUrl, screenWakeTime, screenSleepTime, disableClientLogs, disableDebugLogs,
-                                       smtpHost, smtpPort, smtpUser, smtpPass, notificationEmail })
+                body: JSON.stringify({ jwtSecret, apiKey, splashScreenUrl, screenWakeTime, screenSleepTime, disableClientLogs, disableDebugLogs, showOfflineAlert,
+                                       periodicScreenshotEnabled, periodicScreenshotInterval,
+                                       smtpHost, smtpPort, smtpUser, smtpPass, notificationEmail,
+                                       emailNotificationsEnabled, notifyPlaylistChange, notifyPlayerOffline, notifyPlayerOnline, notifyTechAlert, offlineAlertDelay })
             });
             if (res.ok) { 
                 alert('Enregistré !'); 
-                logout(); 
+                if (jwtSecret !== originalJwtSecret) {
+                    logout(); 
+                } else {
+                    window.location.reload();
+                }
             } else {
                 const error = await res.text();
                 alert('Erreur lors de la sauvegarde : ' + error);
@@ -250,5 +346,8 @@
 
         load();
     </script>
+    <footer style="text-align: center; margin-top: 40px; padding: 20px; font-size: 12px; color: #7f8c8d; border-top: 1px solid #34495e;">
+        OmniSign est sous <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: #3498db; text-decoration: none;">licence MIT</a> - Auteur : <a href="https://github.com/gotenash" target="_blank" style="color: #3498db; text-decoration: none;">gotenash</a>
+    </footer>
 </body>
 </html>

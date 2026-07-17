@@ -116,11 +116,86 @@
             font-family: monospace; font-size: 10px; padding: 5px; 
             z-index: 10000; pointer-events: none; max-width: 80%;
         }
+
+        /* Styles pour l'écran de serveur indisponible */
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.9; }
+        }
+
+        #offline-screen {
+            display: none;
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 9999;
+        }
+        #offline-screen .bg-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        .offline-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .offline-box {
+            background: rgba(15, 15, 15, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1.5px solid rgba(231, 76, 60, 0.3);
+            border-radius: 20px;
+            padding: 40px 60px;
+            text-align: center;
+            max-width: 80%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
+            animation: fadeIn 0.5s ease-out;
+            font-family: sans-serif;
+        }
+        .offline-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: pulse 2s infinite ease-in-out;
+        }
+        .offline-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #e74c3c;
+            margin-bottom: 12px;
+            letter-spacing: -0.5px;
+        }
+        .offline-text {
+            font-size: 20px;
+            color: #ecf0f1;
+            font-weight: 400;
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
     <div id="alert-overlay"></div>
     <div id="player-screen">
+        <!-- Ecran d'erreur hors-ligne -->
+        <div id="offline-screen">
+            <img class="bg-layer" src="img/splashscreen.png">
+            <div class="offline-container">
+                <div class="offline-box">
+                    <div class="offline-icon">🔌</div>
+                    <div class="offline-title">Serveur indisponible</div>
+                    <div class="offline-text">Veuillez contacter l'administrateur</div>
+                </div>
+            </div>
+        </div>
+
         <div id="loader" style="color: white; font-family: sans-serif; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
             Connexion au serveur...<br>
             <small id="status-extra" style="color: #bdc3c7; font-size: 0.8em;"></small>
@@ -134,6 +209,103 @@
     </div>
 
     <script>
+        let isServerOnline = true;
+        let offlineTimer = null;
+        let offlineCycleInterval = null;
+        let offlineCycleTimeout = null;
+
+        function showOfflineOverlay() {
+            const offlineEl = document.getElementById('offline-screen');
+            if (offlineEl) offlineEl.style.display = 'block';
+            const loaderEl = document.getElementById('loader');
+            if (loaderEl) loaderEl.style.display = 'none';
+        }
+
+        function hideOfflineOverlay() {
+            const offlineEl = document.getElementById('offline-screen');
+            if (offlineEl) offlineEl.style.display = 'none';
+        }
+
+        function showOfflineError() {
+            if (isServerOnline) {
+                isServerOnline = false;
+                log("Serveur hors-ligne détecté. Affichage de l'erreur...");
+                
+                // Essayer de charger la playlist du cache si celle en mémoire est vide
+                if (!playlistData.items || playlistData.items.length === 0) {
+                    try {
+                        const cached = localStorage.getItem('cached_playlist');
+                        if (cached) {
+                            const parsed = JSON.parse(cached);
+                            if (parsed && parsed.items && parsed.items.length > 0) {
+                                playlistData = parsed;
+                                currentPlaylistId = parsed.id;
+                                log("Playlist restaurée depuis le cache local.");
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Erreur de restauration cache:", e);
+                    }
+                }
+
+                // Afficher l'overlay immédiatement
+                showOfflineOverlay();
+
+                // Lancer le dernier diaporama connu au bout d'une minute
+                if (offlineTimer) clearTimeout(offlineTimer);
+                offlineTimer = setTimeout(() => {
+                    if (playlistData.items && playlistData.items.length > 0) {
+                        log("Lancement du dernier diaporama connu...");
+                        if (!isPlaying) {
+                            isPlaying = true;
+                            currentIndex = 0;
+                            playNext();
+                        }
+                        startOfflinePeriodicCycle();
+                    } else {
+                        log("Aucune playlist en mémoire ou en cache local à lancer.");
+                    }
+                }, 60000); // 1 minute
+            }
+        }
+
+        function hideOfflineError() {
+            if (!isServerOnline) {
+                isServerOnline = true;
+                log("Serveur en ligne détecté. Restauration de l'affichage normal...");
+                
+                if (offlineTimer) {
+                    clearTimeout(offlineTimer);
+                    offlineTimer = null;
+                }
+                stopOfflinePeriodicCycle();
+                hideOfflineOverlay();
+            }
+        }
+
+        function startOfflinePeriodicCycle() {
+            stopOfflinePeriodicCycle();
+            hideOfflineOverlay(); // Cacher immédiatement l'erreur pour voir le diaporama lancé
+            
+            offlineCycleInterval = setInterval(() => {
+                showOfflineOverlay();
+                offlineCycleTimeout = setTimeout(() => {
+                    hideOfflineOverlay();
+                }, 20000); // Affiche le message pendant 20 secondes
+            }, 60000); // Répète toutes les minutes (60 secondes)
+        }
+
+        function stopOfflinePeriodicCycle() {
+            if (offlineCycleInterval) {
+                clearInterval(offlineCycleInterval);
+                offlineCycleInterval = null;
+            }
+            if (offlineCycleTimeout) {
+                clearTimeout(offlineCycleTimeout);
+                offlineCycleTimeout = null;
+            }
+        }
+
         // Système de log visuel
         function log(msg, isError = false) {
             console.log(msg);
@@ -192,6 +364,7 @@
             };
             script.onerror = () => {
                 log("Échec chargement Socket.io (Serveur injoignable ?)", false);
+                showOfflineError();
                 script.remove();
             };
             document.head.appendChild(script);
@@ -206,9 +379,20 @@
             socket = io(finalServerUrl, { 
                 auth: { token: targetKey },
                 query: { deviceId: dId },
-                reconnectionAttempts: 5
+                reconnectionAttempts: Infinity
             }); 
-            socket.on('connect', () => log("Socket.io connecté."));
+            socket.on('connect', () => {
+                log("Socket.io connecté.");
+                hideOfflineError();
+            });
+            socket.on('disconnect', (reason) => {
+                log("Socket.io déconnecté: " + reason, false);
+                showOfflineError();
+            });
+            socket.on('connect_error', (err) => {
+                log("Erreur de connexion Socket.io: " + err.message, false);
+                showOfflineError();
+            });
             setupSocketListeners();
         };
 
@@ -221,7 +405,6 @@
                     newData = data.playlists[previewId];
                 } else {
                     log("Chargement de la playlist locale...");
-                    // Suppression du nocache pour le protocole file:// (évite les erreurs de fichier non trouvé)
                     const url = window.location.protocol === 'file:' ? 'playlist.json' : 'playlist.json?nocache=' + Date.now();
                     let res;
                     try {
@@ -230,19 +413,29 @@
                         res = { ok: false, status: 0 };
                     }
 
-                    // Si le fichier n'existe pas encore (404), on affiche un message d'attente propre
-                    if (res.status === 404 || (window.location.protocol === 'file:' && !res.ok)) {
-                        log("Fichier playlist absent, attente...");
-                        document.getElementById('loader').innerHTML = "En attente d'approbation sur le CMS...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
-                        return setTimeout(refreshPlaylist, 10000);
+                    if (!res.ok) {
+                        if (res.status === 404 || window.location.protocol === 'file:') {
+                            log("Fichier playlist absent, attente...");
+                            document.getElementById('loader').innerHTML = "En attente d'approbation sur le CMS...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
+                            document.getElementById('loader').style.display = 'block';
+                            hideOfflineError();
+                            return setTimeout(refreshPlaylist, 10000);
+                        }
+                        throw new Error(`HTTP ${res.status}`);
                     }
-
-                    if (!res.ok && res.status !== 0) throw new Error(`HTTP ${res.status}`);
                     newData = await res.json();
                     log("Playlist locale chargée.");
                 }
 
                 if (newData && newData.items && newData.items.length > 0) {
+                    try {
+                        localStorage.setItem('cached_playlist', JSON.stringify(newData));
+                    } catch (e) {
+                        console.error("Erreur d'écriture dans localStorage:", e);
+                    }
+                    if (previewId || (socket && socket.connected)) {
+                        hideOfflineError();
+                    }
                     const isNewPlaylist = newData.id !== currentPlaylistId;
                     playlistData = newData;
                     currentPlaylistId = newData.id;
@@ -302,6 +495,10 @@
                     if (newData && (newData.status === 'waiting_approval' || newData.items?.length === 0)) {
                         log("Afficheur non configuré.");
                         document.getElementById('loader').innerHTML = "En attente d'approbation ou de contenu...<br><small>ID de l'appareil : <b>" + (newData.deviceId || 'Inconnu') + "</b></small>";
+                        document.getElementById('loader').style.display = 'block';
+                        if (previewId || (socket && socket.connected)) {
+                            hideOfflineError();
+                        }
                     } else {
                         log("Playlist vide ou invalide.", true);
                     }
@@ -309,6 +506,7 @@
                 }
             } catch (e) { 
                 log("Erreur : " + e.message, true);
+                showOfflineError();
                 setTimeout(refreshPlaylist, 5000); 
             }
         }
@@ -375,8 +573,9 @@
             const bgColor = page.backgroundColor || playlistData.backgroundColor || 'black';
             document.getElementById('player-screen').style.backgroundColor = bgColor;
 
-            // Définir le fond global
-            const bgGlobal = playlistData.localBackgroundUrl || playlistData.backgroundUrl;
+            // Définir le fond (Page > Globale)
+            const pageBg = page.localBackgroundUrl || page.backgroundUrl;
+            const bgGlobal = pageBg || playlistData.localBackgroundUrl || playlistData.backgroundUrl;
             if (bgGlobal) {
                 const auth = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
                 globalBgElement.src = bgGlobal.startsWith('/media') ? `${bgGlobal}${auth}` : bgGlobal;
@@ -405,7 +604,7 @@
                     }
 
                     // Appliquer un fond spécifique à la zone si disponible
-                    const zoneBg = zone.localBackgroundUrl || zone.backgroundUrl || page.localBackgroundUrl || page.backgroundUrl;
+                    const zoneBg = zone.localBackgroundUrl || zone.backgroundUrl;
                     const authQuery = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
 
                     if (zoneBg) {
@@ -445,7 +644,7 @@
                             <iframe src="${iframeUrl}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;"></iframe>
                         </div>`;
                     } else if (zone.type === 'qrcode') {
-                        const qrText = zone.text || 'https://pidyn.com';
+                        const qrText = zone.text || 'https://omnisign.com';
                         const qrUrl = zone.localUrl ? mediaUrl : `${serverUrl}/api/admin/qrcode?text=${encodeURIComponent(qrText)}${token ? '&apiKey=' + token : ''}`;
                         zoneElement.innerHTML = `<img src="${qrUrl}" style="width:100%;height:100%;object-fit:contain;">`;
                     } else if (zone.type === 'text') {

@@ -1,7 +1,7 @@
-# PiDyn - Dynamic Digital Signage System
+# OmniSign - Dynamic Digital Signage System
 
 <p align="center">
-  <img src="img/logo_pidyn.jpg" alt="PiDyn Logo" width="300"/>
+  <img src="img/logo_pidyn.jpg" alt="OmniSign Logo" width="300"/>
 </p>
 ## English
 
@@ -10,15 +10,15 @@
 
 ### Preview
 <p align="center">
-  <img src="img/login_pidyn.jpg" alt="PiDyn Login" width="400"/><br>
+  <img src="img/login_pidyn.jpg" alt="OmniSign Login" width="400"/><br>
   <em>Secure Login Interface</em><br><br>
-  <img src="img/pidyn_editor.jpg" alt="PiDyn Editor" width="800"/><br>
+  <img src="img/pidyn_editor.jpg" alt="OmniSign Editor" width="800"/><br>
   <em>Multi-zone Slideshow Editor</em><br><br>
-  <img src="img/mediatheque.jpg" alt="PiDyn Media Library" width="800"/><br>
+  <img src="img/mediatheque.jpg" alt="OmniSign Media Library" width="800"/><br>
   <em>Centralized Media Library Management</em>
 </p>
 
-PiDyn is a comprehensive digital signage solution designed to provide centralized management of content for Raspberry Pi-based display units. It consists of a Node.js server for administration and content delivery, and a client-side application for Raspberry Pi devices that handles display and real-time synchronization.
+OmniSign is a comprehensive digital signage solution designed to provide centralized management of content for Raspberry Pi-based display units. It consists of a Node.js server for administration and content delivery, and a client-side application for Raspberry Pi devices that handles display and real-time synchronization.
 
 ## Features
 ### Server-side (Node.js)
@@ -30,7 +30,9 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 *   **YouTube Bypass (Cookies):** Bypass YouTube's aggressive bot detection (HTTP 429) by uploading a standard Netscape browser `cookies.txt` file directly in the system settings panel.
 *   **Real-time Flash Messaging:** Send instant alerts (info, warning, danger) to specific screens or all devices simultaneously.
 *   **Advanced Analytics:** Track media playback frequency and duration with visual charts (Chart.js) and a "Top 50" leaderboard.
-*   **Remote Device Control:** Take screenshots, force synchronization, clear local cache, or restart the client service directly from the dashboard.
+*   **Interactive Vignettes Grid:** Beautiful card-based visual layout for screen management showing active device configurations, online/offline colors, and real-time screen captures inside virtual monitor mockup cards.
+*   **Remote Device & Power Control:** Take screenshots, adjust volume (system & browser media), force synchronization, clear local cache, send power commands (💡 Wake up, 🌙 Sleep/Standby), restart the system service, or trigger system reboots directly from the admin dashboard.
+*   **Periodic Screen Capturing:** Turn on automatic periodic screenshots in the system settings page with custom interval rules to keep vignettes updated automatically.
 *   **Group Management:** Organize players by location or category to assign content or trigger actions at scale.
 *   **User Management:** Create and manage users with different roles (admin, editor, author) for granular access control. Passwords are securely hashed using bcrypt.
 *   **Playlist Management:** Create, edit, and delete dynamic playlists composed of various media types (images, videos).
@@ -46,15 +48,16 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 *   **PPTX Import:** Fully functional import of PowerPoint presentations converting slides into playlist images (requires `LibreOffice` and `pdftocairo` on the server).
 *   **YouTube Media Import:** Direct YouTube video downloading and importing to the media library using `yt-dlp`.
 *   **Interactive Slideshow Vignettes:** Grid/List view switcher. Grid view features animated thumbnails that cycle through the playlist slides, dynamically rendering the page background, scaled text layers (with custom fonts, alignment, colors), media images, media videos, clocks, and full templates (canteen, meeting status, weather, full-screen video with captions).
-### Client-side (Raspberry Pi & Windows)
-*   **Automated Setup:** Improved `bash` script (`setup_pi.sh`) compatible with Debian 12 (Bookworm) and 13 (Trixie), handling automated installation of Node.js, Chromium, and X11.
+### Client-side (Raspberry Pi, Desktop Linux & Windows)
+*   **Automated Setup:** Improved `bash` scripts (`setup_pi.sh` for Raspberry Pi Bookworm/Trixie, `setup_linux.sh` for general Linux desktop systems like Linux Mint / Ubuntu), handling automated installations of Node.js, Chromium, audio/capture tools, and graphical configuration.
+*   **Universal Desktop session support:** Dynamic user, home directory and authority token lookup in `client_linux` ensuring smooth operation on standard client sessions.
 *   **Kiosk Mode:** Advanced Chromium configuration (auto-login, cursor hiding with `unclutter`, hardware acceleration) for a professional full-screen experience.
-*   **Automatic Boot:** Automatic configuration of LightDM and Openbox to start the player immediately upon power-up.
-*   **Systemd Service:** Sets up `sync-engine.js` as a systemd service for automatic startup and background operation.
+*   **Automatic Boot:** Automatic configuration of LightDM, Openbox or desktop session autostart launchers to start the player immediately upon login/power-up.
+*   **Systemd / User Services:** Sets up `sync-engine.js` as a systemd background service (system-level or user-session level) for automatic operation.
 *   **Real-time Playlist Synchronization:** The client player connects to the server via Socket.IO to receive playlist updates.
-*   **Enhanced Monitoring:** Reports network status (IP, MAC), WiFi details (SSID, Signal Quality), and playback progress to the CMS.
+*   **Enhanced Monitoring:** Reports network status (IP, MAC), WiFi details (SSID, Signal Quality), system audio volume levels, and playback progress to the CMS.
 *   **Media Synchronization:** Automatically downloads and caches media files locally from the server, ensuring smooth playback and offline capability.
-*   **Configurable:** Reads device-specific configuration (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) from `/boot/setup.txt`.
+*   **Configurable:** Reads device-specific configuration (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) from `./setup.txt` (local directory) or `/boot/firmware/setup.txt`.
 
 ## Technologies Used
 *   **Backend:** Node.js, Express.js, Socket.IO, fs-extra, multer, bcrypt, axios
@@ -104,7 +107,23 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
    ```bash
    sudo /boot/setup_pi.sh
    ```
-   The script will update the system, install Node.js, Chromium, X11, copy application files, install Node.js dependencies, and set up systemd services for automatic startup. It will then reboot the system.
+    The script will update the system, install Node.js, Chromium, X11, copy application files, install Node.js dependencies, and set up systemd services for automatic startup. It will then reboot the system.
+
+### General Linux Client Setup (Linux Mint, Ubuntu, Debian)
+1. **Prepare configuration:**
+   Create a `setup.txt` file in your client installation directory (e.g. `$HOME/pidyn/setup.txt`) with the following content:
+   ```
+   DEVICE_ID=your-unique-device-id
+   SERVER_URL=http://your-server-ip:3000
+   API_KEY=ma_cle_secrete_123
+   ```
+2. **Run Installer:**
+   Navigate to the `client_linux/` folder on the target machine and execute the Linux installer script (do NOT run as root/sudo directly):
+   ```bash
+   chmod +x setup_linux.sh
+   ./setup_linux.sh
+   ```
+   This will install dependencies (Node.js, npm, scrot, grim, unclutter, curl, alsa-utils), download packages, and register startup entries inside the desktop session's Autostart folder (`~/.config/autostart/`). On next user login, both the sync engine and the player will start automatically.
 
 ## Usage
 1.  **Access Admin Panel:** Open a web browser and navigate to `http://your-server-ip:3000`.
@@ -117,10 +136,10 @@ PiDyn is a comprehensive digital signage solution designed to provide centralize
 ## License
 This project is licensed under the MIT License.
 
-# PiDyn - Système d'Affichage Dynamique
+# OmniSign - Système d'Affichage Dynamique
 
 <p align="center">
-  <img src="img/logo_pidyn.jpg" alt="Logo PiDyn" width="300"/>
+  <img src="img/logo_pidyn.jpg" alt="Logo OmniSign" width="300"/>
 </p>
 ## Français
 
@@ -129,15 +148,15 @@ This project is licensed under the MIT License.
 
 ### Aperçu
 <p align="center">
-  <img src="img/login_pidyn.jpg" alt="Connexion PiDyn" width="400"/><br>
+  <img src="img/login_pidyn.jpg" alt="Connexion OmniSign" width="400"/><br>
   <em>Interface de connexion sécurisée</em><br><br>
-  <img src="img/pidyn_editor.jpg" alt="Éditeur PiDyn" width="800"/><br>
+  <img src="img/pidyn_editor.jpg" alt="Éditeur OmniSign" width="800"/><br>
   <em>Éditeur de diaporamas multi-zones</em><br><br>
-  <img src="img/mediatheque.jpg" alt="Médiathèque PiDyn" width="800"/><br>
+  <img src="img/mediatheque.jpg" alt="Médiathèque OmniSign" width="800"/><br>
   <em>Gestion centralisée de la médiathèque</em>
 </p>
 
-PiDyn est une solution complète d'affichage dynamique conçue pour offrir une gestion centralisée du contenu pour les unités d'affichage basées sur Raspberry Pi. Il se compose d'un serveur Node.js pour l'administration et la diffusion de contenu, et d'une application côté client pour les appareils Raspberry Pi qui gère l'affichage et la synchronisation en temps réel.
+OmniSign est une solution complète d'affichage dynamique conçue pour offrir une gestion centralisée du contenu pour les unités d'affichage basées sur Raspberry Pi. Il se compose d'un serveur Node.js pour l'administration et la diffusion de contenu, et d'une application côté client pour les appareils Raspberry Pi qui gère l'affichage et la synchronisation en temps réel.
 
 ## Fonctionnalités
 ### Côté Serveur (Node.js)
@@ -149,7 +168,9 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 *   **Contournement de la Détection de Robots (Cookies YouTube) :** Chargez un fichier `cookies.txt` de navigateur directement depuis l'onglet Système du CMS pour bypasser les blocages antirobots de YouTube (erreur 429).
 *   **Messages Flash en Temps Réel :** Envoyez des alertes instantanées (info, attention, danger) à des écrans spécifiques ou à tout le parc.
 *   **Analyses et Statistiques :** Suivez la fréquence et la durée de diffusion des médias avec des graphiques visuels et un classement "Top 50".
-*   **Contrôle à Distance :** Prenez des captures d'écran, forcez la synchronisation, videz le cache ou redémarrez le service client à distance.
+*   **Grille de Vignettes Interactive :** Superbe interface sous forme de fiches interactives affichant la configuration des écrans, les couleurs d'état (en ligne/hors ligne), et leur dernière capture d'écran en temps réel au sein de maquettes de moniteurs virtuels.
+*   **Contrôle à Distance & d'Alimentation :** Prenez des captures d'écran, ajustez le volume (système et player), forcez la synchronisation, videz le cache, pilotez l'alimentation (💡 Allumer, 🌙 Veille/Standby), relancez le service ⚙️ ou redémarrez le système (Reboot 🔌) à distance.
+*   **Captures d'Écran Périodiques Automatiques :** Activez et configurez un intervalle de capture d'écran dans les paramètres généraux système pour mettre à jour automatiquement les vignettes en temps réel.
 *   **Gestion des Groupes :** Organisez les afficheurs par emplacement ou catégorie pour des actions groupées.
 *   **Gestion des Utilisateurs :** Créez et gérez des utilisateurs avec différents rôles (administrateur, éditeur, auteur) pour un contrôle d'accès granulaire. Les mots de passe sont hachés de manière sécurisée à l'aide de bcrypt.
 *   **Gestion des Playlists :** Créez, modifiez et supprimez des playlists dynamiques composées de divers types de médias (images, vidéos).
@@ -165,15 +186,16 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
 *   **Import PPTX :** Importation de présentations PowerPoint entièrement fonctionnelle, convertissant les diapositives en images pour les playlists (nécessite `LibreOffice` et `pdftocairo` sur le serveur).
 *   **Import Vidéo YouTube :** Importation directe de vidéos YouTube dans la médiathèque à l'aide de `yt-dlp`.
 *   **Vignettes de Diaporamas Interactives :** Commutateur Grille/Liste. La vue Grille propose des vignettes animées qui font défiler les pages en rendant l'arrière-plan et en adaptant dynamiquement à l'échelle les calques de texte (avec polices personnalisées, alignement, couleurs), les horloges, les éléments web, les images/vidéos ainsi que les modèles prédéfinis (menu cantine, statut de réunion, météo).
-### Côté Client (Raspberry Pi & Windows)
-*   **Installation Automatisée :** Script `setup_pi.sh` amélioré et bicolore, compatible Debian 12 (Bookworm) et 13 (Trixie), gérant l'installation automatique de Node.js, Chromium et X11.
+### Côté Client (Raspberry Pi, PC Linux & Windows)
+*   **Installation Automatisée :** Scripts d'installation complets (`setup_pi.sh` pour Raspberry Pi sous Debian Bookworm/Trixie, `setup_linux.sh` pour les postes clients Linux génériques comme Linux Mint ou Ubuntu), automatisant l'installation de Node, Chromium, des utilitaires audio/capture, et l'optimisation des DNS (IPv4-first).
+*   **Compatibilité de Session Générique :** Résolution dynamique de l'utilisateur, des répertoires personnels et des cookies d'affichage dans `client_linux` pour s'exécuter sur n'importe quel ordinateur de bureau standard.
 *   **Mode Kiosque :** Configuration avancée de Chromium (connexion auto, masquage souris via `unclutter`, accélération matérielle) pour un rendu plein écran professionnel.
-*   **Démarrage Automatique :** Configuration automatique de LightDM et Openbox pour lancer le lecteur dès la mise sous tension.
-*   **Service Systemd :** Configure le lecteur en tant que service systemd pour un démarrage automatique et un fonctionnement en arrière-plan.
+*   **Démarrage Automatique :** Configuration automatique de LightDM, Openbox ou des gestionnaires de session utilisateur pour démarrer le player automatiquement à l'ouverture de la session graphique.
+*   **Service Systemd / Tâches de Session :** Configure le lecteur en tant que service système d'arrière-plan (systemd classique) ou tâche de session locale pour une persistance automatisée.
 *   **Synchronisation des Playlists en Temps Réel :** Le lecteur se connecte au serveur via Socket.IO pour recevoir les mises à jour des playlists.
-*   **Surveillance Améliorée :** Remontée des infos réseau (IP, MAC), du WiFi (SSID, Signal) et de la progression des téléchargements/lectures.
+*   **Surveillance Améliorée :** Remontée des infos réseau (IP, MAC), du WiFi (SSID, Signal), du volume système, et de la progression des téléchargements/lectures.
 *   **Synchronisation des Médias :** Télécharge et met en cache automatiquement les fichiers multimédias localement depuis le serveur, assurant une lecture fluide et une capacité hors ligne.
-*   **Configurable :** Lit la configuration spécifique à l'appareil (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) à partir de `/boot/setup.txt`.
+*   **Configurable :** Lit la configuration spécifique à l'appareil (`DEVICE_ID`, `SERVER_URL`, `API_KEY`) à partir d'un fichier local `./setup.txt` ou de `/boot/firmware/setup.txt`.
 
 ## Technologies Utilisées
 *   **Backend:** Node.js, Express.js, Socket.IO, fs-extra, multer, bcrypt, axios
@@ -223,7 +245,23 @@ PiDyn est une solution complète d'affichage dynamique conçue pour offrir une g
    ```bash
    sudo /boot/setup_pi.sh
    ```
-   Le script mettra à jour le système, installera Node.js, Chromium, X11, copiera les fichiers de l'application, installera les dépendances Node.js et configurera les services systemd pour un démarrage automatique. Il redémarrera ensuite le système.
+    Le script mettra à jour le système, installera Node.js, Chromium, X11, copiera les fichiers de l'application, installera les dépendances Node.js et configurera les services systemd pour un démarrage automatique. Il redémarrera ensuite le système.
+
+### Configuration du Client Linux classique (Linux Mint, Ubuntu, Debian)
+1. **Préparer la configuration :**
+   Créez un fichier `setup.txt` dans le dossier d'installation du client (ex: `$HOME/pidyn/setup.txt`) avec le contenu suivant :
+   ```
+   DEVICE_ID=votre-identifiant-unique
+   SERVER_URL=http://votre-ip-serveur:3000
+   API_KEY=ma_cle_secrete_123
+   ```
+2. **Lancer l'installateur :**
+   Ouvrez un terminal dans le répertoire `client_linux/` et lancez le script (ne PAS l'exécuter avec sudo directement) :
+   ```bash
+   chmod +x setup_linux.sh
+   ./setup_linux.sh
+   ```
+   Ce script installe les dépendances (Node.js, npm, scrot, grim, unclutter, curl, alsa-utils), télécharge les paquets nécessaires et ajoute les deux services d'affichage au démarrage automatique de votre environnement graphique (`~/.config/autostart/`). Les applications démarreront automatiquement à l'ouverture de votre session.
 
 ## Utilisation
 1.  **Accéder au Panneau d'Administration:** Ouvrez un navigateur web et accédez à `http://votre-ip-serveur:3000`.

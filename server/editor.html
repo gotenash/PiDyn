@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Éditeur de Diaporama - PiDyn Pro</title>
+    <title>Éditeur de Diaporama - OmniSign Pro</title>
     <style>
         body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; position: relative; }
         header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
@@ -407,9 +407,10 @@
         </div>
 
         <div class="sidebar" style="display: flex; flex-direction: column; padding: 0;">
-            <!-- Onglets Page / Calque -->
+            <!-- Onglets Page / Modèle / Calque -->
             <div class="sidebar-tabs" style="display: flex; border-bottom: 1px solid #34495e; background: #111a24; min-height: 40px;">
                 <div class="sidebar-tab active" id="tab-page" onclick="switchSidebarTab('page')" style="flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #3498db; border-bottom: 2px solid #3498db; font-size: 13px; user-select: none;">Page</div>
+                <div class="sidebar-tab" id="tab-template" onclick="switchSidebarTab('template')" style="flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #bdc3c7; border-bottom: 2px solid transparent; font-size: 13px; user-select: none; display: none;">Modèle</div>
                 <div class="sidebar-tab" id="tab-zone" onclick="switchSidebarTab('zone')" style="flex: 1; text-align: center; padding: 12px; cursor: pointer; font-weight: bold; color: #bdc3c7; border-bottom: 2px solid transparent; font-size: 13px; user-select: none;">Calque</div>
             </div>
 
@@ -429,13 +430,16 @@
                     <button class="danger" onclick="deleteCurrentItem()" style="width: 100%; margin-top: 10px;">Supprimer la page</button>
                 </div>
 
-                <div id="template-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
-                    <h3 style="margin-top: 0;">Contenu du Modèle</h3>
-                    <div id="template-fields"></div>
-                </div>
-
                 <div id="no-page-message" style="display: block; text-align: center; color: #bdc3c7; padding: 20px 0; font-size: 12px;">
                     Sélectionnez une diapositive pour afficher et modifier ses propriétés.
+                </div>
+            </div>
+
+            <!-- Contenu de l'onglet Modèle / Vidéo -->
+            <div id="sidebar-template-content" style="flex: 1; overflow-y: auto; padding: 20px; display: none;">
+                <div id="template-editor" style="display: none; border-bottom: 1px solid #34495e; padding-bottom: 15px; margin-bottom: 15px;">
+                    <h3 id="template-editor-title" style="margin-top: 0;">Contenu du Modèle</h3>
+                    <div id="template-fields"></div>
                 </div>
             </div>
 
@@ -990,9 +994,26 @@
 
         function switchSidebarTab(tabName) {
             const tabPage = document.getElementById('tab-page');
+            const tabTemplate = document.getElementById('tab-template');
             const tabZone = document.getElementById('tab-zone');
+            
             const pageContent = document.getElementById('sidebar-page-content');
+            const templateContent = document.getElementById('sidebar-template-content');
             const zoneContent = document.getElementById('sidebar-zone-content');
+            
+            // Masquer tous les contenus d'onglets
+            if (pageContent) pageContent.style.display = 'none';
+            if (templateContent) templateContent.style.display = 'none';
+            if (zoneContent) zoneContent.style.display = 'none';
+            
+            // Réinitialiser le style de tous les onglets
+            [tabPage, tabTemplate, tabZone].forEach(tab => {
+                if (tab) {
+                    tab.classList.remove('active');
+                    tab.style.color = '#bdc3c7';
+                    tab.style.borderBottomColor = 'transparent';
+                }
+            });
             
             if (tabName === 'page') {
                 if (tabPage) {
@@ -1000,25 +1021,20 @@
                     tabPage.style.color = '#3498db';
                     tabPage.style.borderBottomColor = '#3498db';
                 }
-                if (tabZone) {
-                    tabZone.classList.remove('active');
-                    tabZone.style.color = '#bdc3c7';
-                    tabZone.style.borderBottomColor = 'transparent';
-                }
                 if (pageContent) pageContent.style.display = 'block';
-                if (zoneContent) zoneContent.style.display = 'none';
-            } else if (tabName === 'zone') {
-                if (tabPage) {
-                    tabPage.classList.remove('active');
-                    tabPage.style.color = '#bdc3c7';
-                    tabPage.style.borderBottomColor = 'transparent';
+            } else if (tabName === 'template') {
+                if (tabTemplate) {
+                    tabTemplate.classList.add('active');
+                    tabTemplate.style.color = '#3498db';
+                    tabTemplate.style.borderBottomColor = '#3498db';
                 }
+                if (templateContent) templateContent.style.display = 'block';
+            } else if (tabName === 'zone') {
                 if (tabZone) {
                     tabZone.classList.add('active');
                     tabZone.style.color = '#3498db';
                     tabZone.style.borderBottomColor = '#3498db';
                 }
-                if (pageContent) pageContent.style.display = 'none';
                 if (zoneContent) zoneContent.style.display = 'block';
             }
         }
@@ -1048,15 +1064,28 @@
                 document.getElementById('page-bg-color').value = item.backgroundColor || '#000000';
                 document.getElementById('no-page-message').style.display = 'none';
                 
+                const tabTemplate = document.getElementById('tab-template');
                 if (item.template) {
+                    if (tabTemplate) {
+                        tabTemplate.innerText = item.template === 'video_fullscreen' ? 'Vidéo' : 'Modèle';
+                        tabTemplate.style.display = 'block';
+                    }
+                    // Mettre à jour le titre du formulaire selon le cas
+                    const templateTitle = document.getElementById('template-editor-title');
+                    if (templateTitle) {
+                        templateTitle.innerText = item.template === 'video_fullscreen' ? 'Propriétés de la vidéo' : 'Contenu du Modèle';
+                    }
                     document.getElementById('template-editor').style.display = 'block';
                     renderTemplateFields(item);
                 } else {
+                    if (tabTemplate) tabTemplate.style.display = 'none';
                     document.getElementById('template-editor').style.display = 'none';
                 }
             } else {
                 document.getElementById('page-editor').style.display = 'none';
                 document.getElementById('template-editor').style.display = 'none';
+                const tabTemplate = document.getElementById('tab-template');
+                if (tabTemplate) tabTemplate.style.display = 'none';
                 document.getElementById('no-page-message').style.display = 'block';
             }
             
@@ -1783,8 +1812,37 @@
                         const panX = zone.webPanX || 0;
                         const panY = zone.webPanY || 0;
                         const iframeSrc = zone.url.startsWith('/') ? `${zone.url}${PREVIEW_AUTH}` : zone.url;
+                        
+                        const ratio = (playlistData.resolution || '16/9').split('/');
+                        const wRatio = parseInt(ratio[0]) || 16;
+                        const hRatio = parseInt(ratio[1]) || 9;
+                        let virtualW = 1920;
+                        let virtualH = 1080;
+                        if (wRatio === 9 && hRatio === 16) {
+                            virtualW = 1080;
+                            virtualH = 1920;
+                        } else if (wRatio === 4 && hRatio === 3) {
+                            virtualW = 1024;
+                            virtualH = 768;
+                        } else if (wRatio < hRatio) {
+                            virtualW = 1080;
+                            virtualH = Math.round(1080 * (hRatio / wRatio));
+                        } else {
+                            virtualW = 1920;
+                            virtualH = Math.round(1920 * (hRatio / wRatio));
+                        }
+
+                        const screen = document.getElementById('preview-screen');
+                        const screenW = parseFloat(screen.style.width) || screen.offsetWidth || 800;
+                        const scaleRatio = screenW / virtualW;
+                        const zoneVirtualW = virtualW * (zone.w / 100);
+                        const zoneVirtualH = virtualH * (zone.h / 100);
+                        const iframeWidth = zoneVirtualW / zoom;
+                        const iframeHeight = zoneVirtualH / zoom;
+                        const iframeScale = zoom * scaleRatio;
+
                         div.innerHTML = `<div style="width:100%;height:100%;overflow:hidden;position:relative;">
-                            <iframe src="${iframeSrc}" style="width:${100 / zoom}%;height:${100 / zoom}%;border:none;position:absolute;top:0;left:0;transform:scale(${zoom}) translate(${panX}%,${panY}%);transform-origin:0 0;pointer-events:none;"></iframe>
+                            <iframe src="${iframeSrc}" style="width:${iframeWidth}px;height:${iframeHeight}px;border:none;position:absolute;top:0;left:0;transform:scale(${iframeScale}) translate(${panX}%,${panY}%);transform-origin:0 0;pointer-events:none;"></iframe>
                         </div>`;
                         
                         div.onwheel = (e) => {
@@ -1800,15 +1858,40 @@
                                 
                                 const iframe = div.querySelector('iframe');
                                 if (iframe) {
-                                    iframe.style.width = `${100 / zone.webZoom}%`;
-                                    iframe.style.height = `${100 / zone.webZoom}%`;
-                                    iframe.style.transform = `scale(${zone.webZoom}) translate(${zone.webPanX || 0}%, ${zone.webPanY || 0}%)`;
+                                    const r = (playlistData.resolution || '16/9').split('/');
+                                    const wR = parseInt(r[0]) || 16;
+                                    const hR = parseInt(r[1]) || 9;
+                                    let vW = 1920;
+                                    let vH = 1080;
+                                    if (wR === 9 && hR === 16) {
+                                        vW = 1080;
+                                        vH = 1920;
+                                    } else if (wR === 4 && hR === 3) {
+                                        vW = 1024;
+                                        vH = 768;
+                                    } else if (wR < hR) {
+                                        vW = 1080;
+                                        vH = Math.round(1080 * (hR / wR));
+                                    } else {
+                                        vW = 1920;
+                                        vH = Math.round(1920 * (hR / wR));
+                                    }
+
+                                    const scr = document.getElementById('preview-screen');
+                                    const scrW = parseFloat(scr.style.width) || scr.offsetWidth || 800;
+                                    const sRatio = scrW / vW;
+                                    const zVirtualW = vW * (zone.w / 100);
+                                    const zVirtualH = vH * (zone.h / 100);
+                                    
+                                    iframe.style.width = `${zVirtualW / zone.webZoom}px`;
+                                    iframe.style.height = `${zVirtualH / zone.webZoom}px`;
+                                    iframe.style.transform = `scale(${zone.webZoom * sRatio}) translate(${zone.webPanX || 0}%, ${zone.webPanY || 0}%)`;
                                 }
                             }
                         };
                     }
                     else if (zone.type === 'qrcode') {
-                        const qrText = zone.text || 'https://pidyn.com';
+                        const qrText = zone.text || 'https://omnisign.com';
                         div.innerHTML = `<img src="/api/admin/qrcode?text=${encodeURIComponent(qrText)}&token=${token}" style="width:100%;height:100%;object-fit:contain;pointer-events:none;">`;
                     }
                     else if (zone.url) div.innerHTML = `<img src="${zone.url}${PREVIEW_AUTH}">`;
@@ -2022,7 +2105,24 @@
                     
                     const iframe = zoneDiv.querySelector('iframe');
                     if (iframe) {
-                        iframe.style.transform = `scale(${zoom}) translate(${zone.webPanX}%, ${zone.webPanY}%)`;
+                        const r = (playlistData.resolution || '16/9').split('/');
+                        const wR = parseInt(r[0]) || 16;
+                        const hR = parseInt(r[1]) || 9;
+                        let vW = 1920;
+                        if (wR === 9 && hR === 16) {
+                            vW = 1080;
+                        } else if (wR === 4 && hR === 3) {
+                            vW = 1024;
+                        } else if (wR < hR) {
+                            vW = 1080;
+                        } else {
+                            vW = 1920;
+                        }
+
+                        const scr = document.getElementById('preview-screen');
+                        const scrW = parseFloat(scr.style.width) || scr.offsetWidth || 800;
+                        const sRatio = scrW / vW;
+                        iframe.style.transform = `scale(${zoom * sRatio}) translate(${zone.webPanX}%, ${zone.webPanY}%)`;
                     }
                 }
             } else if (mode === 'resizing' && selectedZoneIndex !== -1) {
@@ -2163,7 +2263,7 @@
                 zone.webPanX = parseInt(document.getElementById('z-web-panx').value) || 0;
                 zone.webPanY = parseInt(document.getElementById('z-web-pany').value) || 0;
             } else if (newType === 'qrcode') {
-                zone.text = document.getElementById('z-text').value || 'https://pidyn.com';
+                zone.text = document.getElementById('z-text').value || 'https://omnisign.com';
                 zone.url = "/api/admin/qrcode?text=" + encodeURIComponent(zone.text);
             } else {
                 zone.url = document.getElementById('z-url').value;
@@ -2846,5 +2946,8 @@
             </div>
         </div>
     </div>
+    <footer style="text-align: center; padding: 8px; font-size: 11px; color: #7f8c8d; border-top: 1px solid #34495e; background: #1a252f; z-index: 10;">
+        OmniSign est sous <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: #3498db; text-decoration: none;">licence MIT</a> - Auteur : <a href="https://github.com/gotenash" target="_blank" style="color: #3498db; text-decoration: none;">gotenash</a>
+    </footer>
 </body>
 </html>

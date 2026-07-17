@@ -24,7 +24,7 @@ error_exit() {
 }
 
 # --- Début du script ---
-log_message "Démarrage de la procédure de setup PiDyn..."
+log_message "Démarrage de la procédure de setup OmniSign..."
 
 # 1. Vérifier si le fichier setup.txt existe
 if [ ! -f "$SETUP_FILE" ]; then
@@ -61,9 +61,9 @@ if ! command -v node &> /dev/null; then
     sudo apt-get install -y nodejs || error_exit "Échec de l'installation de Node.js."
 fi
 
-# Installer Chromium, X11 et les dépendances système
+# Installer Chromium, X11 et les dépendances système (y compris outils de gestion d'écran DPMS/Wayland/CEC)
 sudo apt-get install -y --no-install-recommends xserver-xorg x11-xserver-utils xinit lightdm openbox chromium-browser unclutter wireless-tools scrot python3-xdg \
-    fonts-noto fonts-noto-color-emoji fonts-liberation fonts-roboto || sudo apt-get install -y --no-install-recommends chromium xserver-xorg x11-xserver-utils xinit lightdm openbox unclutter wireless-tools scrot python3-xdg fonts-noto fonts-noto-color-emoji fonts-liberation fonts-roboto || error_exit "Échec de l'installation."
+    fonts-noto fonts-noto-color-emoji fonts-liberation fonts-roboto cec-utils wlr-randr wlopm grim || sudo apt-get install -y --no-install-recommends chromium xserver-xorg x11-xserver-utils xinit lightdm openbox unclutter wireless-tools scrot python3-xdg fonts-noto fonts-noto-color-emoji fonts-liberation fonts-roboto cec-utils wlr-randr wlopm grim || error_exit "Échec de l'installation."
 
 # 1. Augmenter le SWAP à 1024Mo (Crucial pour éviter l'Error 4 sur Pi Lite)
 log_message "Augmentation de la taille du SWAP à 1024Mo..."
@@ -108,7 +108,7 @@ sudo mkdir -p "$INSTALL_DIR" || error_exit "Échec de la création du dossier $I
 sudo chown -R pi:pi "$INSTALL_DIR" || error_exit "Échec du changement de propriétaire du dossier $INSTALL_DIR."
 
 # 5. Installer les dépendances Node.js
-log_message "Installation des dépendances Node.js pour PiDyn..."
+log_message "Installation des dépendances Node.js pour OmniSign..."
 cd "$INSTALL_DIR" || error_exit "Impossible de naviguer vers $INSTALL_DIR."
 # On force l'installation de socket.io-client pour éviter les modules manquants
 sudo -u pi npm install socket.io-client axios fs-extra || error_exit "Échec de l'installation des dépendances npm."
@@ -117,7 +117,7 @@ sudo -u pi npm install socket.io-client axios fs-extra || error_exit "Échec de 
 log_message "Configuration du service systemd pour sync-engine.js..."
 cat <<EOF | sudo tee /etc/systemd/system/pidyn-sync.service > /dev/null
 [Unit]
-Description=PiDyn Sync Engine
+Description=OmniSign Sync Engine
 After=network.target
 
 [Service]
@@ -146,7 +146,7 @@ mkdir -p /home/pi/.config/autostart
 cat <<EOF > /home/pi/.config/autostart/pidyn.desktop
 [Desktop Entry]
 Type=Application
-Name=PiDyn Player
+Name=OmniSign Player
 Exec=/home/pi/pidyn/start_player.sh
 EOF
 
@@ -171,7 +171,8 @@ sudo raspi-config nonint do_blanking 0
 sudo systemctl set-default graphical.target
 sudo raspi-config nonint do_boot_behaviour B4 || log_message "Avertissement : Impossible de configurer l'autologin via raspi-config."
 
-# Sécurité supplémentaire : On force les droits sur tout le dossier PiDyn
+# Sécurité supplémentaire : Conversion LF des scripts et forçage des droits sur le dossier PiDyn
+find "$INSTALL_DIR" -name "*.sh" -exec sed -i 's/\r$//' {} +
 sudo chown -R pi:pi "$INSTALL_DIR"
 sudo chmod -R 755 "$INSTALL_DIR"
 
@@ -184,5 +185,5 @@ sync
 log_message "Nettoyage du fichier de setup..."
 # sudo rm "$SETUP_FILE" # Commenté pour permettre de relancer le script si besoin
 
-log_message "Procédure de setup PiDyn terminée. Redémarrage du système..."
+log_message "Procédure de setup OmniSign terminée. Redémarrage du système..."
 sudo reboot

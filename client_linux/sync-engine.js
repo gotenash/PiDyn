@@ -15,9 +15,14 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 const originalLog = console.log;
 console.log = (...args) => originalLog(`[${new Date().toLocaleString()}]`, ...args);
 
-// Charger setup.txt si présent pour éviter la désynchronisation du service systemd
+const homeDir = os.homedir();
+const uid = os.userInfo().uid || 1000;
+
+// Charger setup.txt si présent (recherche locale puis dans /boot)
+const LOCAL_SETUP = path.join(__dirname, 'setup.txt');
 const BOOT_DIR = fs.existsSync('/boot/firmware') ? '/boot/firmware' : '/boot';
-const SETUP_FILE = path.join(BOOT_DIR, 'setup.txt');
+const BOOT_SETUP = path.join(BOOT_DIR, 'setup.txt');
+const SETUP_FILE = fs.existsSync(LOCAL_SETUP) ? LOCAL_SETUP : BOOT_SETUP;
 let localConfig = {};
 if (fs.existsSync(SETUP_FILE)) {
     try {
@@ -376,8 +381,8 @@ socket.on('playlist-updated', async (playlistData) => {
 socket.on('volume-change', (data) => {
     const vol = data.volume;
     console.log(`🔊 Commande de volume reçue : ${vol}%`);
-    // Ajuster le volume système sur le Pi (Master ou HDMI)
-    exec(`amixer sset 'Master' ${vol}% || amixer sset 'PCM' ${vol}% || amixer sset 'HDMI' ${vol}%`, () => {});
+    // Ajuster le volume système (pactl pour PulseAudio/PipeWire sur PC, amixer en fallback)
+    exec(`pactl set-sink-volume @DEFAULT_SINK@ ${vol}% || amixer sset 'Master' ${vol}% || amixer sset 'PCM' ${vol}% || amixer sset 'HDMI' ${vol}%`, () => {});
 });
 
 let lastScreenState = null;
@@ -392,9 +397,9 @@ socket.on('screen-command', (data) => {
     // 1. Essayer via vcgencmd (RPi 3 / drivers legacy)
     exec(`vcgencmd display_power ${state}`, () => {});
 
-    const envPrefix = 'export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority';
-    const waylandEnv = 'export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0';
-    const runEnv = 'export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0';
+    const envPrefix = `export DISPLAY=:0 XAUTHORITY=${homeDir}/.Xauthority`;
+    const waylandEnv = `export XDG_RUNTIME_DIR=/run/user/${uid} WAYLAND_DISPLAY=wayland-0`;
+    const runEnv = `export DISPLAY=:0 XAUTHORITY=${homeDir}/.Xauthority XDG_RUNTIME_DIR=/run/user/${uid} WAYLAND_DISPLAY=wayland-0`;
 
     if (action === 'off') {
         console.log("🛑 Extinction de l'écran (DPMS, Wayland & CEC)...");
@@ -470,7 +475,8 @@ socket.on('screen-command', (data) => {
         setTimeout(() => {
             console.log("📺 Nettoyage et lancement du player Chromium...");
             exec('pkill -f chromium; pkill -f unclutter', () => {
-                exec(`${runEnv} && /home/pi/pidyn/start_player.sh &`, (launchErr) => {
+                const launcherPath = path.join(__dirname, 'start_player.sh');
+                exec(`${runEnv} && ${launcherPath} &`, (launchErr) => {
                     if (launchErr) {
                         console.error(`❌ Erreur lors du lancement du player : ${launchErr.message}`);
                     } else {
@@ -487,8 +493,8 @@ socket.on('request-screenshot', () => {
     const screenshotPath = '/tmp/screenshot.jpg';
     console.log(`📸 Prise d'une capture d'écran...`);
     
-    const waylandCmd = `export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 && grim ${screenshotPath}`;
-    const x11Cmd = `export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority && scrot ${screenshotPath}`;
+    const waylandCmd = `export XDG_RUNTIME_DIR=/run/user/${uid} WAYLAND_DISPLAY=wayland-0 && grim ${screenshotPath}`;
+    const x11Cmd = `export DISPLAY=:0 XAUTHORITY=${homeDir}/.Xauthority && scrot ${screenshotPath}`;
     
     exec(waylandCmd, (waylandErr, stdout, stderr) => {
         if (!waylandErr) {
@@ -536,7 +542,7 @@ socket.on('clear-local-cache', async () => {
 // Écouter les commandes de redémarrage du service
 socket.on('restart-service', () => {
     console.log(`🔄 Commande de redémarrage du service reçue.`);
-    exec('sudo systemctl restart pidyn-sync.service', (error, stdout, stderr) => {
+    exec('systemctl --user restart pidyn-sync.service || sudo systemctl restart pidyn-sync.service', (error, stdout, stderr) => {
         if (error) console.error(`❌ Erreur d'exécution : ${error.message}`);
     });
 });
@@ -544,7 +550,7 @@ socket.on('restart-service', () => {
 // Écouter les commandes de redémarrage du système
 socket.on('reboot-device', () => {
     console.log(`🔌 Commande de redémarrage système (reboot) reçue.`);
-    exec('sudo reboot', (error, stdout, stderr) => {
+    exec('reboot || systemctl reboot || sudo reboot', (error, stdout, stderr) => {
         if (error) console.error(`❌ Erreur d'exécution : ${error.message}`);
     });
 });

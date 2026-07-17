@@ -20,7 +20,7 @@ const DEVICE_ID = (process.env.PIDYN_DEVICE_ID && process.env.PIDYN_DEVICE_ID !=
 const LOCAL_MEDIA_DIR = path.join(__dirname, 'media');
 const LOCAL_MANIFEST = path.join(__dirname, 'playlist.json');
 
-console.log(`--- Démarrage PiDyn Sync Windows (Node ${process.version}) ---`);
+console.log(`--- Démarrage OmniSign Sync Windows (Node ${process.version}) ---`);
 console.log(`📡 Serveur cible : ${SERVER_URL}`);
 console.log(`🆔 ID Afficheur  : ${DEVICE_ID}`);
 
@@ -116,7 +116,19 @@ async function syncPlaylist(playlistData) {
             relativePath = path.basename(url);
         }
         const localPath = path.join(LOCAL_MEDIA_DIR, relativePath);
-        if (!(await fs.pathExists(localPath))) {
+        let isFileValid = false;
+        try {
+            if (await fs.pathExists(localPath)) {
+                const stats = await fs.stat(localPath);
+                if (stats.size > 0) {
+                    isFileValid = true;
+                }
+            }
+        } catch (e) {
+            isFileValid = false;
+        }
+
+        if (!isFileValid) {
             try {
                 console.log(`📥 Téléchargement : ${relativePath}`);
                 await fs.ensureDir(path.dirname(localPath));
@@ -134,6 +146,11 @@ async function syncPlaylist(playlistData) {
                 await fs.chmod(localPath, 0o644);
             } catch (error) {
                 console.error(`❌ Échec du téléchargement de ${relativePath}:`, error.message);
+                try {
+                    if (await fs.pathExists(localPath)) {
+                        await fs.remove(localPath);
+                    }
+                } catch (e) {}
                 return url;
             } 
         }

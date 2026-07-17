@@ -26,6 +26,7 @@ console.error = (...args) => originalError(`[${new Date().toLocaleString()}]`, .
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
+    maxHttpBufferSize: 1e8, // 100 MB max payload size for screenshots
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
@@ -55,6 +56,15 @@ let SMTP_PORT = '587';
 let SMTP_USER = '';
 let SMTP_PASS = '';
 let NOTIFICATION_EMAIL = '';
+let EMAIL_NOTIFICATIONS_ENABLED = true;
+let NOTIFY_PLAYLIST_CHANGE = true;
+let NOTIFY_PLAYER_OFFLINE = true;
+let NOTIFY_PLAYER_ONLINE = true;
+let NOTIFY_TECH_ALERT = true;
+let OFFLINE_ALERT_DELAY = 15;
+let SHOW_OFFLINE_ALERT = true;
+let PERIODIC_SCREENSHOT_ENABLED = false;
+let PERIODIC_SCREENSHOT_INTERVAL = 5; // En minutes
 const SQLITE_DB_PATH = path.join(__dirname, 'pidyn.sqlite'); // New SQLite DB path
 const MEDIA_DIR = path.join(__dirname, 'public/media');
 
@@ -188,8 +198,38 @@ async function initializeDatabase() {
                 table.string('wifiSignal');
                 table.json('downloadStatus'); // Store as JSON string
                 table.string('groupId'); // Lien vers le groupe
+                table.boolean('offlineAlertSent').defaultTo(false);
+                table.integer('volume').defaultTo(100);
+                table.text('latestScreenshot');
             });
             console.log('Table "players" created.');
+        }
+
+        // Migration : Ajout de la colonne offlineAlertSent si elle n'existe pas
+        const hasOfflineAlertSent = await db.schema.hasColumn('players', 'offlineAlertSent');
+        if (!hasOfflineAlertSent) {
+            await db.schema.table('players', (table) => {
+                table.boolean('offlineAlertSent').defaultTo(false);
+            });
+            console.log('Colonne "offlineAlertSent" ajoutée à la table "players".');
+        }
+
+        // Migration : Ajout de la colonne volume si elle n'existe pas
+        const hasVolume = await db.schema.hasColumn('players', 'volume');
+        if (!hasVolume) {
+            await db.schema.table('players', (table) => {
+                table.integer('volume').defaultTo(100);
+            });
+            console.log('Colonne "volume" ajoutée à la table "players".');
+        }
+
+        // Migration : Ajout de la colonne latestScreenshot si elle n'existe pas
+        const hasLatestScreenshot = await db.schema.hasColumn('players', 'latestScreenshot');
+        if (!hasLatestScreenshot) {
+            await db.schema.table('players', (table) => {
+                table.text('latestScreenshot');
+            });
+            console.log('Colonne "latestScreenshot" ajoutée à la table "players".');
         }
     });
 
@@ -266,7 +306,14 @@ async function initializeDatabase() {
                 { key: 'smtpPort', value: '587' },
                 { key: 'smtpUser', value: '' },
                 { key: 'smtpPass', value: '' },
-                { key: 'notificationEmail', value: '' }
+                { key: 'notificationEmail', value: '' },
+                { key: 'emailNotificationsEnabled', value: 'true' },
+                { key: 'notifyPlaylistChange', value: 'true' },
+                { key: 'notifyPlayerOffline', value: 'true' },
+                { key: 'notifyPlayerOnline', value: 'true' },
+                { key: 'notifyTechAlert', value: 'true' },
+                { key: 'offlineAlertDelay', value: '15' },
+                { key: 'showOfflineAlert', value: 'true' }
             ]);
             console.log('Default settings inserted.');
         }
@@ -281,6 +328,12 @@ async function initializeDatabase() {
         if (!debugSetting) {
             await db('settings').insert({ key: 'disableDebugLogs', value: 'false' });
             console.log('Setting "disableDebugLogs" ajouté.');
+        }
+        // Migration : s'assurer que showOfflineAlert existe
+        const showOfflineAlertSetting = await db('settings').where({ key: 'showOfflineAlert' }).first();
+        if (!showOfflineAlertSetting) {
+            await db('settings').insert({ key: 'showOfflineAlert', value: 'true' });
+            console.log('Setting "showOfflineAlert" ajouté.');
         }
         // Migration : s'assurer que les temps de veille existent
         const wakeSetting = await db('settings').where({ key: 'screenWakeTime' }).first();
@@ -300,6 +353,22 @@ async function initializeDatabase() {
             if (!exists) {
                 await db('settings').insert({ key: k, value: k === 'smtpPort' ? '587' : '' });
                 console.log(`Setting "${k}" ajouté.`);
+            }
+        }
+        // Migration : Paramètres de notifications
+        const notificationSettings = [
+            { key: 'emailNotificationsEnabled', value: 'true' },
+            { key: 'notifyPlaylistChange', value: 'true' },
+            { key: 'notifyPlayerOffline', value: 'true' },
+            { key: 'notifyPlayerOnline', value: 'true' },
+            { key: 'notifyTechAlert', value: 'true' },
+            { key: 'offlineAlertDelay', value: '15' }
+        ];
+        for (const s of notificationSettings) {
+            const exists = await db('settings').where({ key: s.key }).first();
+            if (!exists) {
+                await db('settings').insert(s);
+                console.log(`Setting "${s.key}" ajouté.`);
             }
         }
     });
@@ -393,6 +462,16 @@ async function loadSettings() {
     const smtpUserSetting = settings.find(s => s.key === 'smtpUser');
     const smtpPassSetting = settings.find(s => s.key === 'smtpPass');
     const notifyEmailSetting = settings.find(s => s.key === 'notificationEmail');
+    const emailNotificationsEnabledSetting = settings.find(s => s.key === 'emailNotificationsEnabled');
+    const notifyPlaylistChangeSetting = settings.find(s => s.key === 'notifyPlaylistChange');
+    const notifyPlayerOfflineSetting = settings.find(s => s.key === 'notifyPlayerOffline');
+    const notifyPlayerOnlineSetting = settings.find(s => s.key === 'notifyPlayerOnline');
+    const notifyTechAlertSetting = settings.find(s => s.key === 'notifyTechAlert');
+    const offlineAlertDelaySetting = settings.find(s => s.key === 'offlineAlertDelay');
+    const showOfflineAlertSetting = settings.find(s => s.key === 'showOfflineAlert');
+    const periodicScreenshotEnabledSetting = settings.find(s => s.key === 'periodicScreenshotEnabled');
+    const periodicScreenshotIntervalSetting = settings.find(s => s.key === 'periodicScreenshotInterval');
+
     if (jwtSetting) JWT_SECRET = process.env.JWT_SECRET || jwtSetting.value;
     if (apiSetting) API_KEY = process.env.PIDYN_API_KEY || apiSetting.value;
     if (logsSetting) DISABLE_CLIENT_LOGS = logsSetting.value === 'true';
@@ -405,6 +484,15 @@ async function loadSettings() {
     if (smtpUserSetting) SMTP_USER = smtpUserSetting.value;
     if (smtpPassSetting) SMTP_PASS = smtpPassSetting.value;
     if (notifyEmailSetting) NOTIFICATION_EMAIL = notifyEmailSetting.value;
+    if (emailNotificationsEnabledSetting) EMAIL_NOTIFICATIONS_ENABLED = emailNotificationsEnabledSetting.value === 'true';
+    if (notifyPlaylistChangeSetting) NOTIFY_PLAYLIST_CHANGE = notifyPlaylistChangeSetting.value === 'true';
+    if (notifyPlayerOfflineSetting) NOTIFY_PLAYER_OFFLINE = notifyPlayerOfflineSetting.value === 'true';
+    if (notifyPlayerOnlineSetting) NOTIFY_PLAYER_ONLINE = notifyPlayerOnlineSetting.value === 'true';
+    if (notifyTechAlertSetting) NOTIFY_TECH_ALERT = notifyTechAlertSetting.value === 'true';
+    if (offlineAlertDelaySetting) OFFLINE_ALERT_DELAY = parseInt(offlineAlertDelaySetting.value, 10) || 15;
+    if (showOfflineAlertSetting) SHOW_OFFLINE_ALERT = showOfflineAlertSetting.value !== 'false';
+    if (periodicScreenshotEnabledSetting) PERIODIC_SCREENSHOT_ENABLED = periodicScreenshotEnabledSetting.value === 'true';
+    if (periodicScreenshotIntervalSetting) PERIODIC_SCREENSHOT_INTERVAL = parseInt(periodicScreenshotIntervalSetting.value, 10) || 5;
 }
 
 // Initialize DB and migrate data on server start
@@ -417,7 +505,11 @@ initializeDatabase().then(async () => {
     server.listen(PORT, () => {
         console.log(`🚀 CMS Sécurisé sur le port ${PORT}`);
         checkSchedules(); // Évaluation initiale
+        checkOfflinePlayers(); // Évaluation initiale de l'état des écrans
+        triggerPeriodicScreenshots(); // Évaluation initiale des captures périodiques
         setInterval(checkSchedules, 60 * 1000); // Évaluation périodique
+        setInterval(checkOfflinePlayers, 60 * 1000); // Évaluation périodique de l'état des écrans
+        setInterval(triggerPeriodicScreenshots, 60 * 1000); // Évaluation périodique des captures
     });
 }).catch(err => {
     console.error('❌ Échec de l\'initialisation de la base de données:', err);
@@ -508,6 +600,8 @@ const checkSchedules = async (targetDeviceId = null, forceEmit = false) => {
                     playlistToSend.disableClientLogs = DISABLE_CLIENT_LOGS;
                     playlistToSend.disableDebugLogs = DISABLE_DEBUG_LOGS;
                     playlistToSend.splashScreenUrl = SPLASH_SCREEN_URL;
+                    playlistToSend.showOfflineAlert = SHOW_OFFLINE_ALERT;
+                    playlistToSend.volume = player.volume !== undefined ? player.volume : 100;
                     if (player.currentSequenceId) {
                         const seq = await db('sequences').where({ id: player.currentSequenceId }).first();
                         playlistToSend.sequenceContext = {
@@ -1489,6 +1583,19 @@ app.post('/api/admin/playlists', authMiddleware, checkRole(['admin', 'editor', '
                 await db('playlists').insert(playlistData);
             }
             checkSchedules(null, true);
+
+            if (NOTIFY_PLAYLIST_CHANGE) {
+                const actionText = existingPlaylist ? "modifié" : "créé";
+                const subject = `📢 Diaporama ${actionText} : ${name}`;
+                const text = `Le diaporama "${name}" (ID: ${playlistId}) a été ${actionText} par l'utilisateur "${req.user.username}" (Statut: ${status}).`;
+                const html = `<h3>📢 Diaporama ${actionText}</h3>
+                             <p><b>Nom :</b> ${name}</p>
+                             <p><b>ID :</b> <code>${playlistId}</code></p>
+                             <p><b>Auteur :</b> ${req.user.username}</p>
+                             <p><b>Statut :</b> ${status}</p>`;
+                sendNotificationEmail(subject, text, html, req.user.siteId);
+            }
+
             res.json({ success: true, playlistId });
         })
         .catch(err => res.status(500).send('Error saving playlist: ' + err.message));
@@ -1527,6 +1634,20 @@ app.post('/api/admin/playlists/:playlistId/publish', authMiddleware, checkRole([
         }
         
         checkSchedules(null, true);
+
+        if (NOTIFY_PLAYLIST_CHANGE) {
+            const playlist = await db('playlists').where({ id: playlistId }).first();
+            if (playlist) {
+                const subject = `🚀 Diaporama publié : ${playlist.name}`;
+                const text = `Le diaporama "${playlist.name}" a été publié par "${req.user.username}" sur les afficheurs/groupes.`;
+                const html = `<h3>🚀 Diaporama publié</h3>
+                             <p><b>Nom :</b> ${playlist.name}</p>
+                             <p><b>Publié par :</b> ${req.user.username}</p>
+                             <p><b>Destinations :</b> ${playerIds ? playerIds.length : 0} lecteur(s) individuel(s), ${groupIds ? groupIds.length : 0} groupe(s).</p>`;
+                sendNotificationEmail(subject, text, html, req.user.siteId);
+            }
+        }
+
         res.json({ success: true });
     } catch (err) {
         console.error("Erreur publication direct:", err);
@@ -1588,6 +1709,15 @@ app.post('/api/admin/settings', authMiddleware, checkRole(['admin']), async (req
         SMTP_USER = settingsToUpdate.smtpUser || '';
         SMTP_PASS = settingsToUpdate.smtpPass || '';
         NOTIFICATION_EMAIL = settingsToUpdate.notificationEmail || '';
+        EMAIL_NOTIFICATIONS_ENABLED = settingsToUpdate.emailNotificationsEnabled === true || settingsToUpdate.emailNotificationsEnabled === 'true';
+        NOTIFY_PLAYLIST_CHANGE = settingsToUpdate.notifyPlaylistChange === true || settingsToUpdate.notifyPlaylistChange === 'true';
+        NOTIFY_PLAYER_OFFLINE = settingsToUpdate.notifyPlayerOffline === true || settingsToUpdate.notifyPlayerOffline === 'true';
+        NOTIFY_PLAYER_ONLINE = settingsToUpdate.notifyPlayerOnline === true || settingsToUpdate.notifyPlayerOnline === 'true';
+        NOTIFY_TECH_ALERT = settingsToUpdate.notifyTechAlert === true || settingsToUpdate.notifyTechAlert === 'true';
+        OFFLINE_ALERT_DELAY = parseInt(settingsToUpdate.offlineAlertDelay, 10) || 15;
+        SHOW_OFFLINE_ALERT = settingsToUpdate.showOfflineAlert === true || settingsToUpdate.showOfflineAlert === 'true';
+        PERIODIC_SCREENSHOT_ENABLED = settingsToUpdate.periodicScreenshotEnabled === true || settingsToUpdate.periodicScreenshotEnabled === 'true';
+        PERIODIC_SCREENSHOT_INTERVAL = parseInt(settingsToUpdate.periodicScreenshotInterval, 10) || 5;
 
         checkSchedules(null, true); 
         console.log("⚙️ Paramètres système mis à jour.");
@@ -1644,6 +1774,128 @@ app.get('/api/admin/qrcode', authMiddleware, checkRole(['admin', 'editor', 'auth
         res.status(500).send('Erreur génération QR Code : ' + err.message);
     }
 });
+async function sendNotificationEmail(subject, text, html, siteId = null) {
+    if (!EMAIL_NOTIFICATIONS_ENABLED || !SMTP_HOST) return;
+
+    const recipients = new Set();
+    if (NOTIFICATION_EMAIL) recipients.add(NOTIFICATION_EMAIL);
+
+    if (siteId) {
+        try {
+            const siteUsers = await db('users').where({ siteId }).select('email');
+            siteUsers.forEach(u => {
+                if (u.email && u.email.trim() !== '') {
+                    recipients.add(u.email.trim());
+                }
+            });
+        } catch (e) {
+            console.error("Erreur lors de la récupération des e-mails du site :", e.message);
+        }
+    }
+
+    if (recipients.size === 0) return;
+
+    const transporter = nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: parseInt(SMTP_PORT, 10),
+        secure: parseInt(SMTP_PORT, 10) === 465, // SSL sur 465, TLS ailleurs
+        auth: {
+            user: SMTP_USER,
+            pass: SMTP_PASS
+        }
+    });
+
+    const toList = Array.from(recipients).join(', ');
+
+    try {
+        await transporter.sendMail({
+            from: `"PiDyn System" <${SMTP_USER}>`,
+            to: toList,
+            subject: subject,
+            text: text,
+            html: html
+        });
+        console.log(`📧 Notification courriel envoyée à [${toList}] : "${subject}"`);
+    } catch (error) {
+        console.error("❌ Échec de l'envoi de la notification courriel :", error.message);
+    }
+}
+
+async function checkOfflinePlayers() {
+    if (!NOTIFY_PLAYER_OFFLINE && !NOTIFY_PLAYER_ONLINE) return;
+
+    try {
+        const players = await db('players').select('*');
+        const now = new Date();
+
+        for (const player of players) {
+            const isConnected = io.sockets.adapter.rooms.has(player.id); // check if the room exists/has connections
+
+            if (isConnected) {
+                // Si l'afficheur est connecté et qu'on avait envoyé une alerte de déconnexion
+                if (player.offlineAlertSent) {
+                    await db('players').where({ id: player.id }).update({ offlineAlertSent: false });
+                    
+                    if (NOTIFY_PLAYER_ONLINE) {
+                        const subject = `🟢 Écran rétabli : ${player.name}`;
+                        const text = `L'afficheur d'affichage dynamique "${player.name}" (ID: ${player.id}) est de nouveau en ligne.\n\nDate de reconnexion : ${now.toLocaleString()}`;
+                        const html = `<h3>🟢 Écran de nouveau en ligne</h3>
+                                     <p>L'afficheur d'affichage dynamique <b>${player.name}</b> (ID: <code>${player.id}</code>) s'est reconnecté avec succès.</p>
+                                     <p><b>Date de reconnexion :</b> ${now.toLocaleString()}</p>`;
+                        await sendNotificationEmail(subject, text, html, player.siteId);
+                    }
+                }
+            } else {
+                // Si l'afficheur est déconnecté
+                if (player.lastSeen) {
+                    const elapsedMinutes = Math.floor((now - new Date(player.lastSeen)) / 1000 / 60);
+
+                    // Si le délai d'alerte est dépassé et qu'on n'a pas encore envoyé d'alerte
+                    if (elapsedMinutes >= OFFLINE_ALERT_DELAY && !player.offlineAlertSent) {
+                        await db('players').where({ id: player.id }).update({ offlineAlertSent: true });
+
+                        if (NOTIFY_PLAYER_OFFLINE) {
+                            const subject = `🔴 Écran hors-ligne : ${player.name}`;
+                            const text = `L'afficheur d'affichage dynamique "${player.name}" (ID: ${player.id}) est hors-ligne.\n\nDernière vue : ${new Date(player.lastSeen).toLocaleString()} (soit il y a ${elapsedMinutes} minutes).`;
+                            const html = `<h3>🔴 Écran hors-ligne détecté</h3>
+                                         <p>L'afficheur d'affichage dynamique <b>${player.name}</b> (ID: <code>${player.id}</code>) ne répond plus.</p>
+                                         <p><b>Dernière vue :</b> ${new Date(player.lastSeen).toLocaleString()} (soit il y a ${elapsedMinutes} minutes).</p>
+                                         <p><i>Veuillez vérifier l'alimentation et la connexion réseau de l'appareil.</i></p>`;
+                            await sendNotificationEmail(subject, text, html, player.siteId);
+                        }
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error("❌ Erreur lors de la vérification des écrans hors-ligne :", err.message);
+    }
+}
+
+let lastScreenshotTimes = {};
+async function triggerPeriodicScreenshots() {
+    if (!PERIODIC_SCREENSHOT_ENABLED) return;
+
+    try {
+        const intervalMs = (parseInt(PERIODIC_SCREENSHOT_INTERVAL, 10) || 5) * 60 * 1000;
+        const now = Date.now();
+
+        const activeLimit = new Date(Date.now() - 60000);
+        const players = await db('players').where('lastSeen', '>', activeLimit);
+
+        for (const player of players) {
+            const lastTime = lastScreenshotTimes[player.id] || 0;
+            if (now - lastTime >= intervalMs) {
+                io.to(player.id).emit('request-screenshot');
+                console.log(`📸 [PÉRIODIQUE] Demande de capture automatique envoyée à ${player.id}`);
+                lastScreenshotTimes[player.id] = now;
+            }
+        }
+    } catch (err) {
+        console.error("❌ Erreur lors de la capture périodique :", err.message);
+    }
+}
+
 app.post('/api/admin/test-email', authMiddleware, checkRole(['admin']), async (req, res) => {
     const { smtpHost, smtpPort, smtpUser, smtpPass, notificationEmail } = req.body;
     
@@ -1767,6 +2019,21 @@ app.post('/api/admin/players/restart-screen/:deviceId', authMiddleware, checkRol
         .catch(err => res.status(500).send('Error restarting screen: ' + err.message));
 });
 
+app.post('/api/admin/players/reboot/:deviceId', authMiddleware, checkRole(['admin']), (req, res) => {
+    const { deviceId } = req.params;
+    db('players').where({ id: deviceId }).first()
+        .then(player => {
+            if (player) {
+                io.to(deviceId).emit('reboot-device');
+                console.log(`📡 Commande de redémarrage système envoyée à ${deviceId}`);
+                res.json({ success: true, message: 'Commande de redémarrage système envoyée.' });
+            } else {
+                res.status(404).send('Player non trouvé');
+            }
+        })
+        .catch(err => res.status(500).send('Error rebooting system: ' + err.message));
+});
+
 app.post('/api/admin/players/screenshot/:deviceId', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
     const { deviceId } = req.params;
     db('players').where({ id: deviceId }).first()
@@ -1840,6 +2107,22 @@ app.post('/api/admin/players/screen', authMiddleware, checkRole(['admin', 'edito
             }
         })
         .catch(err => res.status(500).send('Error sending screen command: ' + err.message));
+});
+
+app.post('/api/admin/players/:deviceId/volume', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { deviceId } = req.params;
+    const { volume } = req.body;
+    db('players').where({ id: deviceId }).update({ volume })
+        .then((count) => {
+            if (count > 0) {
+                io.to(deviceId).emit('volume-change', { volume });
+                console.log(`📡 Commande de volume envoyée à ${deviceId} : ${volume}%`);
+                res.json({ success: true });
+            } else {
+                res.status(404).send('Player non trouvé');
+            }
+        })
+        .catch(err => res.status(500).send('Error updating volume: ' + err.message));
 });
 
 app.post('/api/admin/assign', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
@@ -1938,22 +2221,43 @@ io.on('connection', async (socket) => {
         await db('players').where({ id: deviceId }).update({ lastSeen: new Date() });
     }, 30000); // Heartbeat every 30 seconds
 
-    // Relayer la capture d'écran reçue du client vers l'interface Admin
+    // Relayer la capture d'écran reçue du client vers l'interface Admin et l'enregistrer
     socket.on('screenshot-taken', (data) => {
         console.log(`✅ Capture d'écran reçue de ${data.deviceId} et relayée aux admins`);
-        io.emit('screenshot-taken', data);
+        db('players').where({ id: data.deviceId }).update({ latestScreenshot: data.image })
+            .then(() => {
+                io.emit('screenshot-taken', data);
+            })
+            .catch(err => console.error("Error saving player screenshot:", err));
     });
 
     // Gérer les mises à jour de statut de téléchargement
-    socket.on('player-status-update', (status) => {
-        db('players').where({ id: deviceId }).update({ downloadStatus: JSON.stringify(status) })
-            .then(() => {
-                if (status.downloading === false) {
+    socket.on('player-status-update', async (status) => {
+        try {
+            await db('players').where({ id: deviceId }).update({ downloadStatus: JSON.stringify(status) });
+            
+            if (status.downloading === false) {
+                if (status.error) {
+                    console.error(`⚠️ Afficheur ${deviceId} a rencontré une erreur de synchro: ${status.error}`);
+                    
+                    if (NOTIFY_TECH_ALERT) {
+                        const player = await db('players').where({ id: deviceId }).first();
+                        const subject = `⚠️ Erreur de synchronisation : ${player ? player.name : deviceId}`;
+                        const text = `L'afficheur "${player ? player.name : deviceId}" (ID: ${deviceId}) signale une erreur de téléchargement / synchronisation :\n\nMessage : ${status.error}`;
+                        const html = `<h3>⚠️ Alerte Technique : Échec de synchronisation</h3>
+                                     <p>L'afficheur <b>${player ? player.name : deviceId}</b> (ID: <code>${deviceId}</code>) a rencontré une erreur lors de la mise à jour de son contenu :</p>
+                                     <p style="color: #e74c3c; font-family: monospace; background: #f9f9f9; padding: 10px; border-left: 3px solid #e74c3c;">${status.error}</p>
+                                     <p><i>Veuillez vérifier que tous les fichiers médias réfécérencieux dans la playlist sont accessibles et valides sur le CMS.</i></p>`;
+                        await sendNotificationEmail(subject, text, html, player ? player.siteId : null);
+                    }
+                } else {
                     console.log(`✅ Afficheur ${deviceId} synchronisé avec succès.`);
                 }
-                io.emit('admin-player-status', { deviceId, status });
-            })
-            .catch(err => console.error(`Error updating download status for ${deviceId}:`, err));
+            }
+            io.emit('admin-player-status', { deviceId, status });
+        } catch (err) {
+            console.error(`Error updating download status for ${deviceId}:`, err);
+        }
     });
 
     // Mise à jour des infos réseau (IP/MAC)
@@ -1988,8 +2292,6 @@ io.on('connection', async (socket) => {
     });
 });
 
-// Exécuter checkSchedules toutes les minutes
-setInterval(() => checkSchedules(), 60 * 1000);
 
 // Gestionnaire d'erreurs global pour capturer les erreurs Multer ou système
 app.use((err, req, res, next) => {

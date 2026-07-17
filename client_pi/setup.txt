@@ -1,3 +1,3 @@
-DEVICE_ID=rasp_bookworm
+DEVICE_ID=rasp_pi5
 SERVER_URL=https://192.168.1.43:3000
 API_KEY=HVTcSNqiTWHgm2J2zVqXeynLSFAmNGnw
