@@ -90,9 +90,25 @@
         .anim-zoom-out { animation: zoomOut 0.8s ease-in forwards; }
 
         /* Texte défilant */
-        .marquee-container { overflow: hidden; white-space: nowrap; width: 100%; display: flex; align-items: center; }
-        .marquee-content { display: inline-block; padding-left: 100%; animation: marquee 15s linear infinite; }
-        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+        .marquee-container {
+            overflow: hidden;
+            white-space: nowrap;
+            flex: 1;
+            display: block;
+            position: relative;
+            width: 100%;
+        }
+        .marquee-content {
+            display: inline-block;
+            white-space: nowrap;
+            padding-left: 100%;
+            animation: omniMarquee 15s linear infinite;
+            will-change: transform;
+        }
+        @keyframes omniMarquee {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(-100%, 0, 0); }
+        }
 
         /* Styles des Alertes Flash */
         #alert-overlay {
@@ -102,20 +118,21 @@
             pointer-events: none;
         }
         .flash-message {
-            padding: 20px;
+            padding: 15px 25px;
             color: white;
             font-family: sans-serif;
             font-size: 2.5vw;
             font-weight: bold;
-            text-align: center;
             box-shadow: 0 5px 15px rgba(0,0,0,0.5);
             margin-bottom: 5px;
             animation: slideDown 0.5s ease-out;
             overflow: hidden;
             display: flex;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             gap: 20px;
+            width: 100%;
+            box-sizing: border-box;
         }
         .flash-info { background: rgba(52, 152, 219, 0.9); }
         .flash-warning { background: rgba(243, 156, 18, 0.9); }
@@ -375,17 +392,13 @@
         }
 
         function hideOfflineError() {
-            if (!isServerOnline) {
-                isServerOnline = true;
-                log("Serveur en ligne détecté. Restauration de l'affichage normal...");
-                
-                if (offlineTimer) {
-                    clearTimeout(offlineTimer);
-                    offlineTimer = null;
-                }
-                stopOfflinePeriodicCycle();
-                hideOfflineOverlay();
+            isServerOnline = true;
+            if (offlineTimer) {
+                clearTimeout(offlineTimer);
+                offlineTimer = null;
             }
+            stopOfflinePeriodicCycle();
+            hideOfflineOverlay();
         }
 
         function startOfflinePeriodicCycle() {
@@ -442,6 +455,21 @@
         let activeClockIntervals = []; // Pour stocker les intervalles des horloges
         let currentPlaylistId = null;
 
+        // Protection anti-mise en veille au niveau du navigateur (Screen Wake Lock API)
+        let wakeLock = null;
+        async function requestScreenWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {}
+        }
+        requestScreenWakeLock();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') requestScreenWakeLock();
+        });
+        setInterval(requestScreenWakeLock, 30000);
+
         const urlParams = new URLSearchParams(window.location.search);
         const serverUrlParam = urlParams.get('serverUrl');
         const previewId = urlParams.get('id');
@@ -468,8 +496,7 @@
                 if (playlistData && playlistData.deviceId) initSocketWithId(playlistData.deviceId);
             };
             script.onerror = () => {
-                log("Échec chargement Socket.io (Serveur injoignable ?)", false);
-                showOfflineError();
+                log("Note: Client Socket.io direct non chargé (synchro gérée par sync-engine).", false);
                 script.remove();
             };
             document.head.appendChild(script);
@@ -481,7 +508,7 @@
             const targetKey = playlistData.apiKey || apiKey || 'ma_cle_secrete_123';
             
             socket = io(finalServerUrl, { 
-                auth: { token: targetKey },
+                auth: { token: targetKey, apiKey: targetKey },
                 query: { deviceId: dId },
                 reconnectionAttempts: Infinity
             }); 
@@ -491,11 +518,15 @@
             });
             socket.on('disconnect', (reason) => {
                 log("Socket.io déconnecté: " + reason, false);
-                showOfflineError();
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
             });
             socket.on('connect_error', (err) => {
                 log("Erreur de connexion Socket.io: " + err.message, false);
-                showOfflineError();
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
             });
             setupSocketListeners();
         };
@@ -544,17 +575,21 @@
                     } catch (e) {
                         console.error("Erreur d'écriture dans localStorage:", e);
                     }
-                    if (previewId || (socket && socket.connected)) {
+                    if (newData.serverOnline === false) {
+                        showOfflineError();
+                    } else {
                         hideOfflineError();
                     }
                     const isNewPlaylist = newData.id !== currentPlaylistId;
                     const splashUrl = newData.localSplashScreenUrl || newData.splashScreenUrl;
                     
-                    // Initialisation du socket si on a enfin le deviceId
-                    if (typeof io === 'undefined') {
-                        loadSocketIO(newData.serverUrl || serverUrl);
-                    } else if (newData.deviceId && !socket) {
-                        initSocketWithId(newData.deviceId);
+                    // Initialisation du socket uniquement en mode prévisualisation CMS
+                    if (previewId && apiKey) {
+                        if (typeof io === 'undefined') {
+                            loadSocketIO(newData.serverUrl || serverUrl);
+                        } else if (newData.deviceId && !socket) {
+                            initSocketWithId(newData.deviceId);
+                        }
                     }
                     
                     if (isNewPlaylist) {
@@ -601,9 +636,7 @@
                         log("Afficheur non configuré.");
                         document.getElementById('loader').innerHTML = "En attente d'approbation ou de contenu...<br><small>ID de l'appareil : <b>" + (newData.deviceId || 'Inconnu') + "</b></small>";
                         document.getElementById('loader').style.display = 'block';
-                        if (previewId || (socket && socket.connected)) {
-                            hideOfflineError();
-                        }
+                        hideOfflineError();
                     } else {
                         log("Playlist vide ou invalide.", true);
                     }
@@ -611,8 +644,10 @@
                 }
             } catch (e) { 
                 log("Attente de synchronisation...", false);
-                showOfflineError();
-                setTimeout(refreshPlaylist, 15000); 
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
+                setTimeout(refreshPlaylist, 5000); 
             }
         }
 
@@ -646,7 +681,34 @@
 
             // Enregistrement des statistiques (hors mode prévisualisation)
             if (!previewId && !playlistData.disableClientLogs) {
-                const itemUrl = page.url || (page.zones && page.zones[0]?.url) || 'Page composite';
+                // Déterminer un nom de média/page lisible et détaillé (avec décomposition des zones pour les pages composites)
+                let itemUrl = page.name || page.title || page.data?.name || page.data?.title;
+                if (!itemUrl) {
+                    if (page.url) {
+                        itemUrl = page.url;
+                    } else if (page.data && (page.data.videoUrl || page.data.imageUrl)) {
+                        itemUrl = page.data.videoUrl || page.data.imageUrl;
+                    } else {
+                        const zones = page.zones || page.data?.zones || [];
+                        if (zones.length > 0) {
+                            const zoneDescs = zones.map(z => {
+                                const rawPath = z.mediaUrl || z.url || z.src || '';
+                                const cleanName = rawPath ? rawPath.split('/').pop().split('?')[0].replace(/^(yt|img|pptx|zip|pdf|media|file)_\d+_/i, '') : '';
+                                const label = z.title || z.name || cleanName || z.type || 'Zone';
+                                const typeTag = z.type ? `[${z.type}]` : '';
+                                return `${typeTag} ${label}`.trim();
+                            }).filter(Boolean);
+                            itemUrl = `Page composite (${zones.length} zones: ${zoneDescs.slice(0, 3).join(' + ')})`;
+                        } else {
+                            itemUrl = 'Page composite (Multi-zones)';
+                        }
+                    }
+                } else {
+                    const zones = page.zones || page.data?.zones || [];
+                    if (zones.length > 0) {
+                        itemUrl = `Composite "${itemUrl}" (${zones.length} zones)`;
+                    }
+                }
                 
                 // On utilise les infos provenant du manifest local (playlist.json)
                 const targetServerUrl = playlistData.serverUrl || serverUrl;
@@ -1014,42 +1076,76 @@
             return 'ℹ️';
         }
 
+        const alertTimers = {};
+
         function displayAlert(alert) {
             const overlay = document.getElementById('alert-overlay');
             if (document.getElementById(`alert-${alert.id}`)) return;
+
             const div = document.createElement('div');
             div.id = `alert-${alert.id}`;
             div.className = `flash-message flash-${alert.type}`;
             
             div.innerHTML = `
-                <span style="flex-shrink: 0;">${getAlertIcon(alert.type)}</span>
-                <div class="marquee-container" style="flex: 1;">
-                    <div class="marquee-content">${alert.text}</div>
+                <span style="flex-shrink: 0; font-size: 2.5vw;">${getAlertIcon(alert.type)}</span>
+                <div class="marquee-wrapper" style="flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 100%; display: flex; align-items: center;">
+                    <div id="marquee-text-${alert.id}" style="display: inline-block; white-space: nowrap; font-size: 2.5vw; font-weight: bold; position: relative; will-change: transform;">${alert.text}</div>
                 </div>
             `;
             overlay.appendChild(div);
+
+            const textEl = document.getElementById(`marquee-text-${alert.id}`);
+            const wrapperEl = textEl.parentElement;
+
+            let offset = wrapperEl.offsetWidth || window.innerWidth;
+            const speed = 2.5; // Vitesse de défilement (pixels par trame à 60 FPS)
+
+            function step() {
+                if (!document.getElementById(`alert-${alert.id}`)) return;
+                offset -= speed;
+                const textWidth = textEl.offsetWidth || 300;
+                const containerWidth = wrapperEl.offsetWidth || window.innerWidth;
+
+                if (offset < -textWidth) {
+                    offset = containerWidth;
+                }
+                textEl.style.transform = `translate3d(${offset}px, 0, 0)`;
+                alertTimers[alert.id] = requestAnimationFrame(step);
+            }
+
+            requestAnimationFrame(() => {
+                offset = wrapperEl.offsetWidth || window.innerWidth;
+                step();
+            });
+        }
+
+        function removeAlert(alertId) {
+            if (alertTimers[alertId]) {
+                cancelAnimationFrame(alertTimers[alertId]);
+                delete alertTimers[alertId];
+            }
+            const el = document.getElementById(`alert-${alertId}`);
+            if (el) el.remove();
         }
 
         function renderAlertsFromManifest(alerts) {
             const overlay = document.getElementById('alert-overlay');
             const currentAlertIds = alerts.map(a => `alert-${a.id}`);
             
-            // Supprimer les alertes qui ne sont plus dans le manifest
             Array.from(overlay.children).forEach(child => {
-                if (!currentAlertIds.includes(child.id)) child.remove();
+                if (!currentAlertIds.includes(child.id)) {
+                    const rawId = child.id.replace('alert-', '');
+                    removeAlert(rawId);
+                }
             });
 
-            // Ajouter les nouvelles alertes
             alerts.forEach(displayAlert);
         }
 
         function setupSocketListeners() {
             if (!socket) return;
             socket.on('show-alert', (alert) => displayAlert(alert));
-            socket.on('clear-alert', (id) => {
-                const el = document.getElementById(`alert-${id}`);
-                if (el) el.remove();
-            });
+            socket.on('clear-alert', (id) => removeAlert(id));
             // Ajout de l'écoute des mises à jour de playlist pour une transition immédiate
             socket.on('playlist-updated', (data) => {
                 log("Mise à jour immédiate reçue via Socket.");

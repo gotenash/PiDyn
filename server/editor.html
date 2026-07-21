@@ -4,7 +4,7 @@
     <title>Éditeur de Diaporama - OmniSign Pro</title>
     <style>
         body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; position: relative; }
-        header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
+        header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; gap: 15px; }
         
         .main-container { display: flex; flex: 1; overflow: hidden; }
         
@@ -389,15 +389,15 @@
             <input type="checkbox" id="grid-toggle" checked onchange="toggleGrid()" style="width: auto; margin: 0;">
             Aimantation
         </label>
-        <div style="display: flex; gap: 5px; align-items: center; border-left: 1px solid #34495e; padding-left: 10px; margin-left: 5px;">
+        <div style="display: flex; gap: 12px; align-items: center; border-left: 1px solid #34495e; padding-left: 15px; margin-left: 10px;">
             <button type="button" id="btn-toggle-sidebar" onclick="toggleSidebar()" title="Afficher/Masquer le panneau des propriétés" class="hover-expand-btn" style="background: #3498db;">📐<span class="btn-text">Propriétés</span></button>
             <button type="button" id="btn-toggle-timeline" onclick="toggleTimeline()" title="Afficher/Masquer la frise chronologique" class="hover-expand-btn" style="background: #3498db;">🎞️<span class="btn-text">Frise</span></button>
+            <button type="button" class="hover-expand-btn secondary" onclick="previewPlaylist()" title="Aperçu du diaporama">👁️<span class="btn-text">Aperçu</span></button>
+            <button type="button" class="hover-expand-btn" onclick="savePlaylist()" title="Enregistrer le diaporama" style="background: #27ae60;">💾<span class="btn-text">Enregistrer</span></button>
+            <button type="button" id="btn-submit-playlist" class="hover-expand-btn" onclick="submitCurrentPlaylist()" title="Soumettre pour validation" style="background: #e67e22; display: none;">📨<span class="btn-text">Soumettre</span></button>
+            <button type="button" id="btn-approve-playlist" class="hover-expand-btn" onclick="approveCurrentPlaylist()" title="Valider ce diaporama" style="background: #2ecc71; display: none;">✅<span class="btn-text">Valider</span></button>
+            <button type="button" id="btn-publish-playlist" class="hover-expand-btn" onclick="openPublishModal()" title="Diffuser sur les écrans" style="background: #9b59b6; display: none;">📢<span class="btn-text">Publier</span></button>
         </div>
-        <button type="button" class="hover-expand-btn secondary" onclick="previewPlaylist()" title="Aperçu du diaporama">👁️<span class="btn-text">Aperçu</span></button>
-        <button type="button" class="hover-expand-btn" onclick="savePlaylist()" title="Enregistrer le diaporama" style="background: #27ae60;">💾<span class="btn-text">Enregistrer</span></button>
-        <button type="button" id="btn-submit-playlist" class="hover-expand-btn" onclick="submitCurrentPlaylist()" title="Soumettre pour validation" style="background: #e67e22; display: none;">📨<span class="btn-text">Soumettre</span></button>
-        <button type="button" id="btn-approve-playlist" class="hover-expand-btn" onclick="approveCurrentPlaylist()" title="Valider ce diaporama" style="background: #2ecc71; display: none;">✅<span class="btn-text">Valider</span></button>
-        <button type="button" id="btn-publish-playlist" class="hover-expand-btn" onclick="openPublishModal()" title="Diffuser sur les écrans" style="background: #9b59b6; display: none;">📢<span class="btn-text">Publier</span></button>
     </header>
 
     <div class="main-container">

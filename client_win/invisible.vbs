@@ -1,0 +1,3 @@
+Set WshShell = CreateObject("WScript.Shell")
+' Lance le fichier bat spécifié en premier argument, le 0 signifie "Masqué"
+WshShell.Run Chr(34) & WScript.Arguments(0) & Chr(34), 0, False

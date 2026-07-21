@@ -2,6 +2,7 @@ const { io } = require('socket.io-client');
 const axios = require('axios');
 const fs = require('fs-extra');
 const path = require('path');
+const http = require('http');
 const { exec } = require('child_process');
 const os = require('os');
 const util = require('util');
@@ -12,6 +13,7 @@ const isWin = os.platform() === 'win32';
 // Tampon en mémoire pour les logs récents (recherche de bugs à distance)
 const logBuffer = [];
 const maxLogLines = 300;
+let activeAlerts = []; // Stockage local des alertes actives
 
 // Ajout de l'horodatage aux logs du client
 const originalLog = console.log;
@@ -58,181 +60,271 @@ async function ensureInitialManifest() {
         const initialData = {
             id: 'waiting',
             deviceId: DEVICE_ID,
-            serverUrl: SERVER_URL,
             items: [],
-            status: 'waiting_approval'
+            activeAlerts: []
         };
-        await fs.writeJson(LOCAL_MANIFEST, initialData);
-        console.log("📄 Manifest de sécurité créé.");
+        await fs.writeJson(LOCAL_MANIFEST, initialData, { spaces: 2 });
     }
 }
 ensureInitialManifest();
 
-const socket = io(SERVER_URL, {
-    auth: { token: API_KEY },
-    query: { deviceId: DEVICE_ID },
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 2000,
-    reconnectionDelayMax: 10000,
-    timeout: 20000
-});
-
+// Récupérer la liste de toutes les interfaces réseau (IPv4 non internes)
 async function getNetworkInfo() {
     const interfaces = os.networkInterfaces();
-    let info = { ip: 'Inconnue', mac: 'Inconnue', ssid: null, signal: null };
-    
+    const ips = [];
+    let mac = 'Inconnue';
+
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
-            if ((iface.family === 'IPv4' || iface.family === 4) && !iface.internal) {
-                info.ip = iface.address;
-                info.mac = iface.mac;
+            if (iface.family === 'IPv4' && !iface.internal) {
+                ips.push(`${name}: ${iface.address}`);
+                if (mac === 'Inconnue' && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    mac = iface.mac;
+                }
             }
         }
     }
+    const totalMem = Math.round(os.totalmem() / 1024 / 1024);
+    const freeMem = Math.round(os.freemem() / 1024 / 1024);
+
+    let diskTotal = null;
+    let diskFree = null;
 
     try {
-        // Sur Windows, on utilise netsh pour récupérer les infos WiFi
-        const { stdout } = await execPromise('netsh wlan show interfaces');
-        const ssidMatch = stdout.match(/ SSID\s+:\s+(.*)/);
-        const signalMatch = stdout.match(/ Signal\s+:\s+(.*)/);
-        if (ssidMatch) info.ssid = ssidMatch[1].trim();
-        if (signalMatch) info.signal = signalMatch[1].trim();
-    } catch (e) { /* Pas de WiFi ou erreur netsh */ }
+        const psDisk = `powershell -command "Get-CimInstance -ClassName Win32_LogicalDisk -Filter \\\"DeviceID='C:'\\\" | Select-Object Size, FreeSpace"`;
+        const stdout = execSync(psDisk).toString();
+        const matches = stdout.match(/\d+/g);
+        if (matches && matches.length >= 2) {
+            diskFree = Math.round(parseInt(matches[0]) / 1024 / 1024 / 1024);
+            diskTotal = Math.round(parseInt(matches[1]) / 1024 / 1024 / 1024);
+        }
+    } catch (e) {}
 
-    return info;
+    return {
+        ip: ips.length > 0 ? ips.join(' | ') : '127.0.0.1',
+        mac: mac,
+        platform: 'Windows',
+        totalMem,
+        freeMem,
+        diskTotal,
+        diskFree
+    };
+}
+
+const socket = io(SERVER_URL, {
+    query: { deviceId: DEVICE_ID },
+    auth: { apiKey: API_KEY },
+    reconnection: true,
+    reconnectionDelay: 2000,
+    reconnectionDelayMax: 10000
+});
+
+function getLocalFilename(url) {
+    if (!url) return '';
+    let name = '';
+    try {
+        const parsed = new URL(url, SERVER_URL);
+        name = path.basename(parsed.pathname);
+    } catch (e) {
+        name = path.basename(url.split('?')[0]);
+    }
+    try {
+        name = decodeURIComponent(name);
+    } catch (e) {}
+    return name;
+}
+
+function resolveMediaUrl(url) {
+    if (!url) return '';
+    const baseUrl = (url.startsWith('http://') || url.startsWith('https://')) ? url : `${SERVER_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+    if (baseUrl.includes('apiKey=')) return baseUrl;
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${separator}apiKey=${encodeURIComponent(API_KEY)}`;
+}
+
+async function downloadFile(url, destPath) {
+    const fullUrl = resolveMediaUrl(url);
+    console.log(`📥 Téléchargement : ${getLocalFilename(url)}`);
+    const writer = fs.createWriteStream(destPath);
+    const response = await axios({
+        url: fullUrl,
+        method: 'GET',
+        headers: { 'X-API-KEY': API_KEY },
+        responseType: 'stream'
+    });
+    response.data.pipe(writer);
+    return new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+    });
+}
+
+async function cleanUnusedFiles(neededFiles) {
+    await fs.ensureDir(LOCAL_MEDIA_DIR);
+    const filesOnDisk = await fs.readdir(LOCAL_MEDIA_DIR);
+    for (const file of filesOnDisk) {
+        if (!neededFiles.includes(file)) {
+            console.log(`🗑️ Nettoyage : suppression du fichier inutilisé ${file}`);
+            await fs.remove(path.join(LOCAL_MEDIA_DIR, file));
+        }
+    }
 }
 
 async function syncPlaylist(playlistData) {
-    if (!playlistData || !playlistData.items) {
-        return console.warn('⚠️ Playlist reçue vide ou invalide.');
-    }
-    console.log('🔄 Synchronisation en cours...');
-    await fs.ensureDir(LOCAL_MEDIA_DIR, { mode: 0o755 });
+    if (!playlistData || !playlistData.items) return;
+    console.log('🔄 Synchronisation de la playlist...');
+    
+    // Transmettre l'état des téléchargements vers le serveur
+    socket.emit('player-status-update', { downloading: true, progress: 0 });
 
-    const allUrls = [];
-    if (playlistData.backgroundUrl) allUrls.push(playlistData.backgroundUrl);
-    if (playlistData.splashScreenUrl) allUrls.push(playlistData.splashScreenUrl);
+    await fs.ensureDir(LOCAL_MEDIA_DIR);
+    const neededFiles = [];
+
+    const itemsToDownload = [];
     playlistData.items.forEach(item => {
-        if (item.backgroundUrl) allUrls.push(item.backgroundUrl);
-        if (item.zones) item.zones.forEach(z => { 
-            if (z.url) allUrls.push(z.url); 
-            if (z.fontUrl) allUrls.push(z.fontUrl);
-        });
-    });
-    const uniqueUrls = [...new Set(allUrls.filter(u => !!u))];
-    let processedCount = 0;
-
-    const downloadMedia = async (url) => {
-        if (!url) return null;
-        let relativePath;
-        if (url.startsWith('/media/')) {
-            relativePath = url.substring('/media/'.length);
-        } else if (url.startsWith('/img/')) {
-            relativePath = 'img/' + url.substring('/img/'.length);
-        } else if (url.startsWith('/api/admin/qrcode')) {
-            let textVal = 'default';
-            try {
-                const urlObj = new URL(url, 'http://localhost');
-                textVal = urlObj.searchParams.get('text') || 'default';
-            } catch (e) {}
-            // Base64url encode to get a clean safe string (max 30 chars) without restricted chars (?, =, etc)
-            const cleanText = Buffer.from(textVal).toString('base64url').substring(0, 30);
-            relativePath = `qrcodes/qr_${cleanText}.png`;
-        } else {
-            relativePath = path.basename(url);
+        if (item.url && (item.type === 'image' || item.type === 'video' || item.type === 'audio')) {
+            const filename = getLocalFilename(item.url);
+            neededFiles.push(filename);
+            itemsToDownload.push({ url: item.url, filename });
         }
-        const localPath = path.join(LOCAL_MEDIA_DIR, relativePath);
-        let isFileValid = false;
-        try {
-            if (await fs.pathExists(localPath)) {
-                const stats = await fs.stat(localPath);
-                if (stats.size > 0) {
-                    isFileValid = true;
-                }
+        if (item.data) {
+            if (item.data.videoUrl) {
+                const filename = getLocalFilename(item.data.videoUrl);
+                neededFiles.push(filename);
+                itemsToDownload.push({ url: item.data.videoUrl, filename });
             }
-        } catch (e) {
-            isFileValid = false;
-        }
-
-        if (!isFileValid) {
-            try {
-                console.log(`📥 Téléchargement : ${relativePath}`);
-                await fs.ensureDir(path.dirname(localPath));
-                const response = await axios({
-                    url: `${SERVER_URL}${url}`,
-                    headers: { 'X-API-KEY': API_KEY },
-                    responseType: 'stream'
-                });
-                const writer = fs.createWriteStream(localPath);
-                response.data.pipe(writer);
-                await new Promise((resolve, reject) => {
-                    writer.on('finish', resolve);
-                    writer.on('error', reject);
-                });
-                await fs.chmod(localPath, 0o644);
-            } catch (error) {
-                console.error(`❌ Échec du téléchargement de ${relativePath}:`, error.message);
-                try {
-                    if (await fs.pathExists(localPath)) {
-                        await fs.remove(localPath);
+            if (item.data.imageUrl) {
+                const filename = getLocalFilename(item.data.imageUrl);
+                neededFiles.push(filename);
+                itemsToDownload.push({ url: item.data.imageUrl, filename });
+            }
+            if (item.data.audioUrl) {
+                const filename = getLocalFilename(item.data.audioUrl);
+                neededFiles.push(filename);
+                itemsToDownload.push({ url: item.data.audioUrl, filename });
+            }
+            if (item.data.zones && Array.isArray(item.data.zones)) {
+                item.data.zones.forEach(z => {
+                    if (z.mediaUrl) {
+                        const filename = getLocalFilename(z.mediaUrl);
+                        neededFiles.push(filename);
+                        itemsToDownload.push({ url: z.mediaUrl, filename });
                     }
-                } catch (e) {}
-                return url;
-            } 
-        }
-        processedCount++;
-        socket.emit('player-status-update', { 
-            downloading: true, 
-            progress: Math.round((processedCount / uniqueUrls.length) * 100) 
-        });
-        // Force l'usage des slashes pour le HTML même sur Windows
-        return `./media/${relativePath.split(path.sep).join('/')}`;
-    };
-
-    if (playlistData.backgroundUrl) playlistData.localBackgroundUrl = await downloadMedia(playlistData.backgroundUrl);
-    if (playlistData.splashScreenUrl) playlistData.localSplashScreenUrl = await downloadMedia(playlistData.splashScreenUrl);
-
-    for (const item of playlistData.items) {
-        if (item.backgroundUrl) item.localBackgroundUrl = await downloadMedia(item.backgroundUrl);
-        if (item.zones) {
-            for (const zone of item.zones) {
-                if (zone.url) zone.localUrl = await downloadMedia(zone.url);
-                if (zone.fontUrl) zone.localFontUrl = await downloadMedia(zone.fontUrl);
+                });
             }
         }
-    }
+        if (item.type === 'pptx' && item.slides && Array.isArray(item.slides)) {
+            item.slides.forEach(slideUrl => {
+                const filename = getLocalFilename(slideUrl);
+                neededFiles.push(filename);
+                itemsToDownload.push({ url: slideUrl, filename });
+            });
+        }
+        if (item.qrCodeUrl) {
+            const filename = getLocalFilename(item.qrCodeUrl);
+            neededFiles.push(filename);
+            itemsToDownload.push({ url: item.qrCodeUrl, filename });
+        }
+    });
 
-    try {
-        const allLocalFiles = await fs.readdir(LOCAL_MEDIA_DIR, { recursive: true });
-        for (const file of allLocalFiles) {
-            const fullPath = path.join(LOCAL_MEDIA_DIR, file);
-            const stats = await fs.stat(fullPath);
-            if (stats.isDirectory()) continue;
+    const totalToDownload = itemsToDownload.length;
+    let completedDownloads = 0;
 
-            const relPath = path.relative(LOCAL_MEDIA_DIR, fullPath).split(path.sep).join('/');
-            const relativeUrl = relPath.startsWith('img/') ? '/' + relPath : '/media/' + relPath;
-            
-            if (!uniqueUrls.includes(relativeUrl)) {
-                console.log(`🗑️ Nettoyage : suppression du fichier inutilisé ${file}`);
-                await fs.remove(fullPath);
+    for (const item of itemsToDownload) {
+        const localPath = path.join(LOCAL_MEDIA_DIR, item.filename);
+        const exists = await fs.pathExists(localPath);
+        if (!exists) {
+            try {
+                await downloadFile(item.url, localPath);
+            } catch (err) {
+                console.error(`❌ Échec du téléchargement pour ${item.filename}:`, err.message);
+                socket.emit('player-status-update', { downloading: false, error: err.message });
             }
         }
-    } catch (err) {
-        console.error('⚠️ Erreur lors du nettoyage du cache :', err.message);
+        completedDownloads++;
+        const progressPercentage = Math.round((completedDownloads / totalToDownload) * 100);
+        socket.emit('player-status-update', { downloading: true, progress: progressPercentage });
     }
 
-    playlistData.deviceId = DEVICE_ID;
-    playlistData.serverUrl = SERVER_URL;
-    playlistData.apiKey = API_KEY;
+    await cleanUnusedFiles(neededFiles);
 
-    await fs.writeJson(LOCAL_MANIFEST, playlistData);
+    const localPlaylist = JSON.parse(JSON.stringify(playlistData));
+    localPlaylist.items.forEach(item => {
+        if (item.url && (item.type === 'image' || item.type === 'video' || item.type === 'audio')) {
+            item.url = `/media/${getLocalFilename(item.url)}`;
+        }
+        if (item.data) {
+            if (item.data.videoUrl) {
+                item.data.localVideoUrl = `/media/${getLocalFilename(item.data.videoUrl)}`;
+                item.data.videoUrl = `/media/${getLocalFilename(item.data.videoUrl)}`;
+            }
+            if (item.data.imageUrl) {
+                item.data.localImageUrl = `/media/${getLocalFilename(item.data.imageUrl)}`;
+                item.data.imageUrl = `/media/${getLocalFilename(item.data.imageUrl)}`;
+            }
+            if (item.data.audioUrl) {
+                item.data.audioUrl = `/media/${getLocalFilename(item.data.audioUrl)}`;
+            }
+            if (item.data.zones && Array.isArray(item.data.zones)) {
+                item.data.zones.forEach(z => {
+                    if (z.mediaUrl) z.mediaUrl = `/media/${getLocalFilename(z.mediaUrl)}`;
+                });
+            }
+        }
+        if (item.type === 'pptx' && item.slides && Array.isArray(item.slides)) {
+            item.slides = item.slides.map(slideUrl => `/media/${getLocalFilename(slideUrl)}`);
+        }
+        if (item.qrCodeUrl) {
+            item.qrCodeUrl = `/media/${getLocalFilename(item.qrCodeUrl)}`;
+        }
+    });
+
+    localPlaylist.deviceId = DEVICE_ID;
+    localPlaylist.serverUrl = SERVER_URL;
+    localPlaylist.apiKey = API_KEY;
+    localPlaylist.activeAlerts = activeAlerts;
+    localPlaylist.serverOnline = true;
+
+    await fs.writeJson(LOCAL_MANIFEST, localPlaylist, { spaces: 2 });
     await fs.chmod(LOCAL_MANIFEST, 0o644);
     socket.emit('player-status-update', { downloading: false });
     console.log('✅ Playlist locale à jour.');
 }
 
+async function setServerStatus(isOnline) {
+    try {
+        if (await fs.pathExists(LOCAL_MANIFEST)) {
+            const manifest = await fs.readJson(LOCAL_MANIFEST);
+            if (manifest.serverOnline !== isOnline) {
+                manifest.serverOnline = isOnline;
+                await fs.writeJson(LOCAL_MANIFEST, manifest, { spaces: 2 });
+            }
+        }
+    } catch (e) {}
+}
+
+// Maintien d'éveil permanent de l'écran et du système Windows (SetThreadExecutionState)
+function keepWindowsAwake() {
+    const psCmd = `powershell -command "$code = 'using System; using System.Runtime.InteropServices; public class WinAwake { [DllImport(\\\"kernel32.dll\\\")] public static extern uint SetThreadExecutionState(uint f); public static void Keep() { SetThreadExecutionState(0x80000005); } }'; Add-Type -TypeDefinition $code; [WinAwake]::Keep()"`;
+    exec(psCmd, () => {});
+}
+keepWindowsAwake();
+setInterval(keepWindowsAwake, 60000);
+
+// Écouteur du raccourci clavier global Ctrl + AltGr + K pour exécuter kill_omnisign.bat
+function startHotkeyListener() {
+    const scriptPath = path.join(__dirname, 'hotkey_listener.ps1');
+    const cmd = `powershell -ExecutionPolicy Bypass -File "${scriptPath}"`;
+    console.log("⌨️ Raccourci d'arrêt système actif : Ctrl + AltGr + K");
+    exec(cmd, (err) => {
+        if (!err) console.log("🛑 Raccourci d'arrêt déclenché (Ctrl + AltGr + K).");
+    });
+}
+startHotkeyListener();
+
 socket.on('connect', async () => {
+    keepWindowsAwake();
+    await setServerStatus(true);
     console.log(`Connecté au CMS en tant que ${DEVICE_ID}`);
     const network = await getNetworkInfo();
     const totalMem = Math.round(os.totalmem() / 1024 / 1024);
@@ -241,22 +333,135 @@ socket.on('connect', async () => {
     socket.emit('player-info-update', network);
 });
 
+// Envoi périodique de la télémétrie de santé au serveur (toutes les minutes)
+setInterval(async () => {
+    if (socket && socket.connected) {
+        try {
+            const network = await getNetworkInfo();
+            socket.emit('player-info-update', network);
+        } catch (e) {}
+    }
+}, 60000);
+
+socket.on('disconnect', async (reason) => {
+    console.log(`🔌 Connexion au CMS perdue (${reason})`);
+    await setServerStatus(false);
+});
+
+socket.on('connect_error', async (err) => {
+    await setServerStatus(false);
+});
+
+// Écouter les commandes de contrôle à distance (Reboot, Restart, Écran, Volume, Cache)
+socket.on('reboot-device', () => {
+    console.log('⚡ Commande reçue : Redémarrage physique de Windows (Reboot)');
+    exec('shutdown /r /t 2 /f', (err) => {
+        if (err) console.error('⚠️ Erreur redémarrage Windows :', err.message);
+    });
+});
+
+socket.on('restart-service', () => {
+    console.log('🔄 Commande reçue : Relance du joueur OmniSign');
+    exec('taskkill /f /im chrome.exe', () => {
+        const batPath = path.join(__dirname, 'omnisign-start.bat');
+        exec(`cmd.exe /c "${batPath}"`, (err) => {
+            if (err) console.error('⚠️ Erreur relance joueur :', err.message);
+        });
+    });
+});
+
+let lastScreenState = 'on';
+
+socket.on('screen-command', (data) => {
+    const action = data.action; // 'on' ou 'off'
+    if (lastScreenState === action) return;
+    lastScreenState = action;
+
+    console.log(`📺 Commande écran Windows reçue : ${action.toUpperCase()}`);
+
+    if (action === 'off') {
+        // 1. Fermer Chrome/Edge pour arrêter complètement le diaporama et stopper la consommation CPU/GPU
+        exec('taskkill /f /im chrome.exe /im msedge.exe >nul 2>&1', () => {
+            console.log("🛑 Navigateur Chrome fermé pour la mise en veille de l'écran.");
+            // 2. Éteindre l'affichage Windows via Win32 API
+            const psCmd = `powershell -command "$code = 'using System; using System.Runtime.InteropServices; public class WinMon { [DllImport(\\\"user32.dll\\\")] public static extern int SendMessage(int h, int m, int w, int l); public static void Off() { SendMessage(0xFFFF, 0x0112, 0xF170, 2); } }'; Add-Type -TypeDefinition $code; [WinMon]::Off()"`;
+            exec(psCmd);
+        });
+    } else if (action === 'on') {
+        // 1. Rallumer l'affichage Windows via Win32 API
+        const psCmd = `powershell -command "$code = 'using System; using System.Runtime.InteropServices; public class WinMon { [DllImport(\\\"user32.dll\\\")] public static extern int SendMessage(int h, int m, int w, int l); [DllImport(\\\"user32.dll\\\")] public static extern void keybd_event(byte b, byte s, uint f, UIntPtr e); public static void On() { SendMessage(0xFFFF, 0x0112, 0xF170, -1); keybd_event(0, 0, 0, UIntPtr.Zero); } }'; Add-Type -TypeDefinition $code; [WinMon]::On()"`;
+        exec(psCmd, () => {
+            // 2. Relancer Google Chrome en mode Kiosk
+            setTimeout(() => {
+                exec('tasklist /fi "IMAGENAME eq chrome.exe"', (err, stdout) => {
+                    if (!stdout || !stdout.includes('chrome.exe')) {
+                        console.log("🚀 Relancement de Google Chrome Kiosk sur réveil de l'écran...");
+                        const chromeCmd = `start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk --no-first-run --user-data-dir="%TEMP%\\omnisign_chrome_profile" --disable-cache --disk-cache-size=1 --media-cache-size=1 --edge-touch-filtering=disabled --autoplay-policy=no-user-gesture-required --ignore-gpu-blocklist --enable-gpu-rasterization --disable-gpu-driver-bug-workarounds --gpu-no-context-lost "http://localhost:8080/player.html"`;
+                        exec(chromeCmd);
+                    }
+                });
+            }, 1000);
+        });
+    }
+});
+
+socket.on('clear-local-cache', async () => {
+    console.log('🧹 Commande reçue : Purge du cache local');
+    try {
+        await fs.emptyDir(LOCAL_MEDIA_DIR);
+        console.log('✅ Cache médias vidé.');
+    } catch (err) {
+        console.error('⚠️ Erreur vidage cache :', err.message);
+    }
+});
+
 socket.on('playlist-updated', async (playlistData) => {
     await syncPlaylist(playlistData);
 });
 
+// Écouter le contrôle du volume à distance sous Windows
+socket.on('volume-change', (data) => {
+    const rawVal = parseInt(data.volume);
+    const vol = isNaN(rawVal) ? 100 : Math.max(0, Math.min(100, rawVal));
+    console.log(`🔊 Modification du volume système Windows : ${vol}%`);
+    const scriptPath = path.join(__dirname, 'set_volume.ps1');
+    const cmd = `powershell -ExecutionPolicy Bypass -File "${scriptPath}" -Volume ${vol}`;
+    exec(cmd, (err) => {
+        if (err) console.error(`⚠️ Erreur réglage volume Windows :`, err.message);
+    });
+});
+
+// Écouter les messages d'alerte Flash
+socket.on('show-alert', async (alert) => {
+    console.log(`🚨 Notification / Message Flash reçu : "${alert.text}"`);
+    if (!activeAlerts.find(a => a.id === alert.id)) {
+        activeAlerts.push(alert);
+        await updateManifestWithAlerts();
+    }
+});
+
+socket.on('clear-alert', async (alertId) => {
+    console.log(`🔕 Fin du message Flash ID : ${alertId}`);
+    activeAlerts = activeAlerts.filter(a => a.id != alertId);
+    await updateManifestWithAlerts();
+});
+
+async function updateManifestWithAlerts() {
+    try {
+        const exists = await fs.pathExists(LOCAL_MANIFEST);
+        if (exists) {
+            const manifest = await fs.readJson(LOCAL_MANIFEST);
+            manifest.activeAlerts = activeAlerts;
+            await fs.writeJson(LOCAL_MANIFEST, manifest, { spaces: 2 });
+        }
+    } catch (e) {
+        console.error("Erreur lors de la mise à jour des alertes dans le manifest local :", e);
+    }
+}
+
 // Écouter la demande de logs de l'admin
 socket.on('request-logs', () => {
     socket.emit('logs-response', { deviceId: DEVICE_ID, logs: logBuffer.join('\n') });
-});
-
-socket.on('screen-command', (data) => {
-    const state = data.action === 'on' ? 'on' : 'off';
-    console.log(`📺 Commande écran reçue : force ${state}`);
-    
-    const lparam = data.action === 'on' ? -1 : 2;
-    const cmd = `powershell -command "(Add-Type '[DllImport(\"user32.dll\")] public class Win32 { [DllImport(\"user32.dll\")] public static extern int SendMessage(int hWnd, int hMsg, int wParam, int lParam); }' -PassThru)::SendMessage(0xffff, 0x0112, 0xf170, ${lparam})"`;
-    exec(cmd);
 });
 
 socket.on('request-screenshot', () => {
@@ -266,10 +471,8 @@ socket.on('request-screenshot', () => {
     exec(psCommand, async (error, stdout, stderr) => {
         if (error) {
             console.error(`❌ Erreur capture Windows : ${error.message}`);
-            if (stderr) console.error(`❌ PowerShell stderr: ${stderr}`);
             return;
         }
-        if (stdout) console.log(`✅ PowerShell stdout: ${stdout}`);
         const image = await fs.readFile(screenshotPath, { encoding: 'base64' });
         socket.emit('screenshot-taken', { deviceId: DEVICE_ID, image: `data:image/jpeg;base64,${image}` });
         await fs.remove(screenshotPath);
@@ -281,5 +484,118 @@ socket.on('restart-service', () => {
     process.exit(0);
 });
 
-process.on('unhandledRejection', (reason) => console.error('❌ Rejet non géré :', reason));
-process.on('uncaughtException', (err) => console.error('❌ Exception non capturée :', err));
+// ==========================================
+// SERVEUR WEB LOCAL SUR LE PORT 8080
+// Permet de distribuer player.html et les médias sans dépendance externe
+// ==========================================
+const mimeTypes = {
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.ttf': 'font/ttf',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2'
+};
+
+const localServer = http.createServer(async (req, res) => {
+    let rawUrl = req.url.split('?')[0];
+    let safeUrl = rawUrl;
+    try {
+        safeUrl = decodeURIComponent(rawUrl);
+    } catch (e) {}
+
+    if (safeUrl === '/' || safeUrl === '/player') {
+        safeUrl = '/player.html';
+        rawUrl = '/player.html';
+    }
+
+    let filePath = path.join(__dirname, safeUrl);
+
+    try {
+        let exists = await fs.pathExists(filePath);
+        if (!exists) {
+            const rawFilePath = path.join(__dirname, rawUrl);
+            if (await fs.pathExists(rawFilePath)) {
+                filePath = rawFilePath;
+                exists = true;
+            } else {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+                return res.end('Fichier non trouvé');
+            }
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+        const stat = await fs.stat(filePath);
+        const fileSize = stat.size;
+        const range = req.headers.range;
+
+        // Gérer les Range Requests pour la lecture des fichiers vidéo sous Chrome
+        if (range) {
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+            if (start >= fileSize || end >= fileSize) {
+                res.writeHead(416, {
+                    "Content-Range": `bytes */${fileSize}`,
+                    "Content-Type": "text/plain; charset=utf-8"
+                });
+                return res.end("Plage de données non satisfiable");
+            }
+
+            const chunksize = (end - start) + 1;
+            const fileStream = fs.createReadStream(filePath, { start, end });
+            fileStream.on('error', (streamErr) => {
+                console.error(`⚠️ Erreur de flux de lecture (206) :`, streamErr.message);
+            });
+            const head = {
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunksize,
+                'Content-Type': contentType,
+            };
+            res.writeHead(206, head);
+            fileStream.pipe(res);
+        } else {
+            const head = {
+                'Content-Length': fileSize,
+                'Content-Type': contentType,
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            };
+            res.writeHead(200, head);
+            const fileStream = fs.createReadStream(filePath);
+            fileStream.on('error', (streamErr) => {
+                console.error(`⚠️ Erreur de flux de lecture (200) :`, streamErr.message);
+            });
+            fileStream.pipe(res);
+        }
+    } catch (err) {
+        console.error(`Erreur serveur web local :`, err);
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Erreur interne serveur');
+    }
+});
+
+const LOCAL_PORT = 8080;
+localServer.listen(LOCAL_PORT, '0.0.0.0', () => {
+    console.log(`🌐 Serveur web local Windows démarré sur http://localhost:${LOCAL_PORT}`);
+});
+
+localServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.log(`⚠️ Le port ${LOCAL_PORT} est déjà occupé. Utilisation du serveur web externe déjà actif.`);
+    } else {
+        console.error(`❌ Erreur serveur web local :`, err.message);
+    }
+});

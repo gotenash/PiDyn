@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <style>
         /* Reset de base */
         body, html { margin: 0; padding: 0; background: black; overflow: hidden; height: 100vh; width: 100vw; cursor: none !important; }
@@ -21,6 +22,8 @@
             width: 100%; height: 100%;
             object-fit: cover;
             z-index: 1;
+            will-change: transform;
+            transform: translate3d(0,0,0);
         }
         #player-screen .zone {
             position: absolute;
@@ -29,12 +32,17 @@
             justify-content: center;
             align-items: center;
             z-index: 2;
+            will-change: transform;
+            transform: translate3d(0,0,0);
         }
         #player-screen .zone img,
         #player-screen .zone video {
             width: 100%;
             height: 100%;
             object-fit: contain; /* Garde l'aspect ratio, s'adapte à la zone */
+            will-change: transform; /* Force le GPU à gérer les transformations */
+            transform: translate3d(0,0,0); /* Crée un contexte de rendu 3D isolé */
+            backface-visibility: hidden; /* Empêche les artefacts 3D indésirables */
         }
         #player-screen .zone iframe {
             width: 100%;
@@ -82,9 +90,25 @@
         .anim-zoom-out { animation: zoomOut 0.8s ease-in forwards; }
 
         /* Texte défilant */
-        .marquee-container { overflow: hidden; white-space: nowrap; width: 100%; display: flex; align-items: center; }
-        .marquee-content { display: inline-block; padding-left: 100%; animation: marquee 15s linear infinite; }
-        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-200%); } }
+        .marquee-container {
+            overflow: hidden;
+            white-space: nowrap;
+            flex: 1;
+            display: block;
+            position: relative;
+            width: 100%;
+        }
+        .marquee-content {
+            display: inline-block;
+            white-space: nowrap;
+            padding-left: 100%;
+            animation: omniMarquee 15s linear infinite;
+            will-change: transform;
+        }
+        @keyframes omniMarquee {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(-100%, 0, 0); }
+        }
 
         /* Styles des Alertes Flash */
         #alert-overlay {
@@ -94,20 +118,48 @@
             pointer-events: none;
         }
         .flash-message {
-            padding: 20px;
+            padding: 15px 25px;
             color: white;
             font-family: sans-serif;
             font-size: 2.5vw;
             font-weight: bold;
-            text-align: center;
             box-shadow: 0 5px 15px rgba(0,0,0,0.5);
             margin-bottom: 5px;
             animation: slideDown 0.5s ease-out;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 20px;
+            width: 100%;
+            box-sizing: border-box;
         }
         .flash-info { background: rgba(52, 152, 219, 0.9); }
         .flash-warning { background: rgba(243, 156, 18, 0.9); }
         .flash-danger { background: rgba(231, 76, 60, 0.9); }
         @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
+        /* Templates Styles */
+        .tpl-container { 
+            width: 100%; height: 100%; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; z-index: 5; 
+            will-change: transform;
+            transform: translate3d(0,0,0);
+        }
+        .tpl-container video {
+            will-change: transform;
+            transform: translate3d(0,0,0);
+            backface-visibility: hidden;
+        }
+        .tpl-header { font-size: 5vw; margin-bottom: 4vh; border-bottom: 3px solid #3498db; padding-bottom: 10px; font-weight: bold; }
+        .tpl-content { display: flex; flex-direction: column; gap: 2vh; width: 80%; }
+        .tpl-row { background: rgba(255,255,255,0.1); padding: 2vh; border-radius: 15px; display: flex; align-items: center; }
+        .tpl-label { color: #3498db; font-size: 2vw; width: 30%; text-align: left; font-weight: bold; }
+        .tpl-value { font-size: 3vw; width: 70%; text-align: right; }
+        
+        .tpl-meeting-room { font-size: 8vw; font-weight: bold; margin-bottom: 2vh; }
+        .tpl-meeting-status { font-size: 4vw; padding: 2vh 5vw; border-radius: 100px; margin-top: 4vh; }
+        .status-disponible { background: #27ae60; }
+        .status-occupée { background: #e74c3c; }
 
         /* Style pour les infos de debug à l'écran */
         #debug-log {
@@ -179,6 +231,61 @@
             font-weight: 400;
             opacity: 0.9;
         }
+
+        /* Styles pour l'affichage en petit en bas (mini-error) */
+        #offline-screen.mini-error {
+            pointer-events: none;
+            z-index: 10000;
+        }
+        #offline-screen.mini-error .bg-layer {
+            display: none !important;
+        }
+        #offline-screen.mini-error .offline-container {
+            background: transparent !important;
+            top: auto;
+            bottom: 20px;
+            height: auto;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 10px;
+        }
+        #offline-screen.mini-error .offline-box {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 24px;
+            border-radius: 12px;
+            background: rgba(15, 15, 15, 0.9);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(231, 76, 60, 0.4);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            max-width: 90%;
+            animation: fadeIn 0.3s ease-out;
+            pointer-events: auto;
+            text-align: left;
+        }
+        #offline-screen.mini-error .offline-icon {
+            font-size: 28px;
+            margin-bottom: 0;
+            animation: pulse 1.5s infinite ease-in-out;
+        }
+        #offline-screen.mini-error .offline-details {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        #offline-screen.mini-error .offline-title {
+            font-size: 16px;
+            margin-bottom: 2px;
+            font-weight: 700;
+        }
+        #offline-screen.mini-error .offline-text {
+            font-size: 12px;
+            font-weight: 400;
+            opacity: 0.8;
+        }
     </style>
 </head>
 <body>
@@ -190,8 +297,10 @@
             <div class="offline-container">
                 <div class="offline-box">
                     <div class="offline-icon">🔌</div>
-                    <div class="offline-title">Serveur indisponible</div>
-                    <div class="offline-text">Veuillez contacter l'administrateur</div>
+                    <div class="offline-details">
+                        <div class="offline-title">Serveur indisponible</div>
+                        <div class="offline-text">Veuillez contacter l'administrateur</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -214,16 +323,29 @@
         let offlineCycleInterval = null;
         let offlineCycleTimeout = null;
 
-        function showOfflineOverlay() {
+        function showOfflineOverlay(isMini = false) {
+            if (playlistData && (playlistData.showOfflineAlert === false || playlistData.showOfflineAlert === 'false')) {
+                return;
+            }
             const offlineEl = document.getElementById('offline-screen');
-            if (offlineEl) offlineEl.style.display = 'block';
+            if (offlineEl) {
+                if (isMini) {
+                    offlineEl.classList.add('mini-error');
+                } else {
+                    offlineEl.classList.remove('mini-error');
+                }
+                offlineEl.style.display = 'block';
+            }
             const loaderEl = document.getElementById('loader');
             if (loaderEl) loaderEl.style.display = 'none';
         }
 
         function hideOfflineOverlay() {
             const offlineEl = document.getElementById('offline-screen');
-            if (offlineEl) offlineEl.style.display = 'none';
+            if (offlineEl) {
+                offlineEl.style.display = 'none';
+                offlineEl.classList.remove('mini-error');
+            }
         }
 
         function showOfflineError() {
@@ -249,7 +371,7 @@
                 }
 
                 // Afficher l'overlay immédiatement
-                showOfflineOverlay();
+                showOfflineOverlay(false);
 
                 // Lancer le dernier diaporama connu au bout d'une minute
                 if (offlineTimer) clearTimeout(offlineTimer);
@@ -270,17 +392,13 @@
         }
 
         function hideOfflineError() {
-            if (!isServerOnline) {
-                isServerOnline = true;
-                log("Serveur en ligne détecté. Restauration de l'affichage normal...");
-                
-                if (offlineTimer) {
-                    clearTimeout(offlineTimer);
-                    offlineTimer = null;
-                }
-                stopOfflinePeriodicCycle();
-                hideOfflineOverlay();
+            isServerOnline = true;
+            if (offlineTimer) {
+                clearTimeout(offlineTimer);
+                offlineTimer = null;
             }
+            stopOfflinePeriodicCycle();
+            hideOfflineOverlay();
         }
 
         function startOfflinePeriodicCycle() {
@@ -288,7 +406,7 @@
             hideOfflineOverlay(); // Cacher immédiatement l'erreur pour voir le diaporama lancé
             
             offlineCycleInterval = setInterval(() => {
-                showOfflineOverlay();
+                showOfflineOverlay(true);
                 offlineCycleTimeout = setTimeout(() => {
                     hideOfflineOverlay();
                 }, 20000); // Affiche le message pendant 20 secondes
@@ -312,21 +430,20 @@
             const logEl = document.getElementById('debug-log');
             if (logEl) {
                 logEl.innerText = msg;
-                // On affiche toujours si c'est une erreur, sinon on respecte le réglage
                 if (isError) {
-                    logEl.style.display = 'block';
                     logEl.style.color = '#e74c3c'; // Rouge pour l'erreur
+                    logEl.style.display = 'block';
                 } else {
-                    // Sécurité si playlistData n'est pas encore défini ou si c'est la playlist vide par défaut
                     const hide = playlistData && playlistData.disableDebugLogs === true;
                     logEl.style.display = hide ? 'none' : 'block';
                     logEl.style.color = '#2ecc71'; // Vert normal
                 }
             }
-            if (msg.includes("Démarrage") || msg.includes("Page suivante") || msg.includes("lecture") || msg.includes("chargée")) {
+            // Masquer le loader dès qu'une activité de lecture commence ou que la playlist est prête
+            if (msg.includes("Démarrage") || msg.includes("suivante") || msg.includes("lecture") || msg.includes("chargée") || msg.includes("Playlist chargée")) {
                 document.getElementById('loader').style.display = 'none';
             }
-            if (isError) document.getElementById('status-extra').innerText = msg;
+            if (isError && document.getElementById('status-extra')) document.getElementById('status-extra').innerText = msg;
         }
 
         window.onerror = (m, u, l) => log(`Erreur JS ligne ${l}: ${m}`, true);
@@ -338,11 +455,27 @@
         let activeClockIntervals = []; // Pour stocker les intervalles des horloges
         let currentPlaylistId = null;
 
+        // Protection anti-mise en veille au niveau du navigateur (Screen Wake Lock API)
+        let wakeLock = null;
+        async function requestScreenWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {}
+        }
+        requestScreenWakeLock();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') requestScreenWakeLock();
+        });
+        setInterval(requestScreenWakeLock, 30000);
+
         const urlParams = new URLSearchParams(window.location.search);
         const serverUrlParam = urlParams.get('serverUrl');
         const previewId = urlParams.get('id');
         const apiKey = urlParams.get('apiKey');
         
+        let socket = null;
         // Détection de l'URL du serveur
         let serverUrl = serverUrlParam || (window.location.hostname === "" ? "http://localhost:3000" : window.location.origin);
         if (serverUrl.endsWith('/')) serverUrl = serverUrl.slice(0, -1); // Nettoyage slash final
@@ -363,21 +496,19 @@
                 if (playlistData && playlistData.deviceId) initSocketWithId(playlistData.deviceId);
             };
             script.onerror = () => {
-                log("Échec chargement Socket.io (Serveur injoignable ?)", false);
-                showOfflineError();
+                log("Note: Client Socket.io direct non chargé (synchro gérée par sync-engine).", false);
                 script.remove();
             };
             document.head.appendChild(script);
         }
 
-        let socket = null;
         function initSocketWithId(dId) {
-            if (socket || typeof io === 'undefined') return;
+            if (socket || typeof io === 'undefined' || !dId) return;
             const finalServerUrl = playlistData.serverUrl || serverUrl;
             const targetKey = playlistData.apiKey || apiKey || 'ma_cle_secrete_123';
             
             socket = io(finalServerUrl, { 
-                auth: { token: targetKey },
+                auth: { token: targetKey, apiKey: targetKey },
                 query: { deviceId: dId },
                 reconnectionAttempts: Infinity
             }); 
@@ -387,24 +518,29 @@
             });
             socket.on('disconnect', (reason) => {
                 log("Socket.io déconnecté: " + reason, false);
-                showOfflineError();
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
             });
             socket.on('connect_error', (err) => {
                 log("Erreur de connexion Socket.io: " + err.message, false);
-                showOfflineError();
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
             });
             setupSocketListeners();
         };
 
         async function refreshPlaylist() {
+            // log("Vérification de la playlist..."); // Trop verbeux pour le log écran
             try {
                 let newData = null;
                 if (previewId && apiKey) {
                     const res = await fetch(`${serverUrl}/api/admin/data`, { headers: { 'X-API-KEY': apiKey } });
+                    if (!res.ok) throw new Error(`Erreur Serveur: ${res.status}`);
                     const data = await res.json();
                     newData = data.playlists[previewId];
                 } else {
-                    log("Chargement de la playlist locale...");
                     const url = window.location.protocol === 'file:' ? 'playlist.json' : 'playlist.json?nocache=' + Date.now();
                     let res;
                     try {
@@ -415,98 +551,102 @@
 
                     if (!res.ok) {
                         if (res.status === 404 || window.location.protocol === 'file:') {
-                            log("Fichier playlist absent, attente...");
-                            document.getElementById('loader').innerHTML = "En attente d'approbation sur le CMS...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
+                            log("En attente de contenu (playlist.json absent)...", false);
+                            document.getElementById('loader').innerHTML = "En attente de contenu...<br><small>Veuillez approuver cet écran dans l'administration.</small>";
                             document.getElementById('loader').style.display = 'block';
                             hideOfflineError();
                             return setTimeout(refreshPlaylist, 10000);
                         }
                         throw new Error(`HTTP ${res.status}`);
                     }
-                    newData = await res.json();
-                    log("Playlist locale chargée.");
+                    
+                    const textData = await res.text();
+                    if (!textData || textData.trim() === "") {
+                        log("Fichier playlist vide, synchronisation en cours ?", false);
+                        return setTimeout(refreshPlaylist, 2000);
+                    }
+                    newData = JSON.parse(textData);
                 }
 
                 if (newData && newData.items && newData.items.length > 0) {
+                    log("Playlist chargée : " + newData.items.length + " éléments.");
                     try {
                         localStorage.setItem('cached_playlist', JSON.stringify(newData));
                     } catch (e) {
                         console.error("Erreur d'écriture dans localStorage:", e);
                     }
-                    if (previewId || (socket && socket.connected)) {
+                    if (newData.serverOnline === false) {
+                        showOfflineError();
+                    } else {
                         hideOfflineError();
                     }
                     const isNewPlaylist = newData.id !== currentPlaylistId;
-                    playlistData = newData;
-                    currentPlaylistId = newData.id;
+                    const splashUrl = newData.localSplashScreenUrl || newData.splashScreenUrl;
                     
-                    // On récupère l'IP du serveur depuis le fichier si elle n'est pas en paramètre et on tente la connexion socket
-                    if (!previewId) {
+                    // Initialisation du socket uniquement en mode prévisualisation CMS
+                    if (previewId && apiKey) {
                         if (typeof io === 'undefined') {
-                            loadSocketIO(playlistData.serverUrl || serverUrl);
-                        } else if (playlistData.deviceId && !socket) {
-                            initSocketWithId(playlistData.deviceId);
+                            loadSocketIO(newData.serverUrl || serverUrl);
+                        } else if (newData.deviceId && !socket) {
+                            initSocketWithId(newData.deviceId);
                         }
                     }
-                    document.getElementById('debug-log').style.display = 'none';
-
-                    // Si la playlist a changé d'ID, on force le redémarrage pour éviter les erreurs d'index
-                    if (isNewPlaylist && isPlaying) {
-                        log("Mise à jour de la playlist détectée.");
+                    
+                    if (isNewPlaylist) {
+                        log("Changement de playlist détecté.");
+                        playlistData = newData;
+                        currentPlaylistId = newData.id;
                         currentIndex = 0;
-                        playNext();
-                        return;
-                    }
-                    
-                    const splashScreenElement = document.getElementById('splash-screen');
-                    const loaderElement = document.getElementById('loader');
-                    const authParam = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
-                    const splashUrl = playlistData.localSplashScreenUrl || playlistData.splashScreenUrl;
-                    
-                    if (splashUrl) {
-                        // Si c'est un chemin local (./media/...), on l'utilise tel quel.
-                        // Sinon, c'est un chemin distant (/img/...), on ajoute l'URL du serveur.
-                        if (splashUrl.startsWith('./')) {
-                            splashScreenElement.src = splashUrl;
-                        } else {
-                            const base = splashUrl.startsWith('http') ? '' : serverUrl;
+                        
+                        if (splashUrl) {
+                            const splashScreenElement = document.getElementById('splash-screen');
+                            const authParam = (previewId && apiKey) ? `?apiKey=${apiKey}` : '';
+                            const base = splashUrl.startsWith('./') ? '' : serverUrl;
                             splashScreenElement.src = `${base}${splashUrl}${authParam}`;
+                            splashScreenElement.style.display = 'block';
+                            document.getElementById('loader').style.display = 'none';
+                            
+                            if (playTimeout) clearTimeout(playTimeout);
+                            isPlaying = true;
+                            playTimeout = setTimeout(playNext, 3000); 
+                        } else {
+                            isPlaying = true;
+                            playNext();
                         }
-                        splashScreenElement.style.display = 'block';
-                        loaderElement.style.display = 'none';
-                        document.getElementById('debug-log').style.display = 'none';
-                        log("Affichage du splashscreen.");
-                        // Le playNext sera appelé après la durée du splashscreen si nécessaire, ou directement
-                        // Pour l'instant, on démarre la playlist après un court délai pour laisser le splashscreen s'afficher
+                    } else {
+                        // Mise à jour simple des données sans couper la lecture
+                        playlistData = newData;
+                        log("Données de playlist synchronisées.");
                         if (!isPlaying) {
                             isPlaying = true;
-                            setTimeout(playNext, 2000); // Afficher le splashscreen pendant 2 secondes
+                            currentIndex = 0;
+                            playNext();
                         }
-                    } else if (!isPlaying) {
-                        log("Démarrage de la lecture (sans splashscreen).");
-                        isPlaying = true;
-                        loaderElement.style.display = 'none';
-                        playNext();
-                    } else {
-                        log("Données mises à jour.");
                     }
+                    
+                    // Afficher les alertes stockées dans le manifest
+                    if (playlistData.activeAlerts) {
+                        renderAlertsFromManifest(playlistData.activeAlerts);
+                    }
+                    // Toujours planifier le prochain rafraîchissement (30s en ligne, 15s hors-ligne)
+                    setTimeout(refreshPlaylist, isServerOnline ? 30000 : 15000);
                 } else {
                     // Si on a des données mais pas d'items, c'est l'état "en attente" ou une playlist vide
                     if (newData && (newData.status === 'waiting_approval' || newData.items?.length === 0)) {
                         log("Afficheur non configuré.");
                         document.getElementById('loader').innerHTML = "En attente d'approbation ou de contenu...<br><small>ID de l'appareil : <b>" + (newData.deviceId || 'Inconnu') + "</b></small>";
                         document.getElementById('loader').style.display = 'block';
-                        if (previewId || (socket && socket.connected)) {
-                            hideOfflineError();
-                        }
+                        hideOfflineError();
                     } else {
                         log("Playlist vide ou invalide.", true);
                     }
                     setTimeout(refreshPlaylist, 10000);
                 }
             } catch (e) { 
-                log("Erreur : " + e.message, true);
-                showOfflineError();
+                log("Attente de synchronisation...", false);
+                if (!playlistData || !playlistData.items || playlistData.items.length === 0) {
+                    showOfflineError();
+                }
                 setTimeout(refreshPlaylist, 5000); 
             }
         }
@@ -515,7 +655,10 @@
             // On nettoie le timeout précédent pour éviter les boucles multiples
             if (playTimeout) clearTimeout(playTimeout);
             // Sécurité : si la playlist est vide ou l'index invalide (changement de playlist)
-            if (!playlistData.items || playlistData.items.length === 0) return;
+            if (!playlistData.items || playlistData.items.length === 0) {
+                isPlaying = false;
+                return;
+            }
             if (currentIndex >= playlistData.items.length) currentIndex = 0;
 
             // Cacher le splashscreen si visible
@@ -528,12 +671,44 @@
             }
 
             const page = playlistData.items[currentIndex];
+            if (!page) {
+                log("Erreur: page indéfinie à l'index " + currentIndex, true);
+                isPlaying = false;
+                return;
+            }
             const globalBgElement = document.getElementById('global-background');
             const pageZonesContainer = document.getElementById('current-page-zones');
 
             // Enregistrement des statistiques (hors mode prévisualisation)
             if (!previewId && !playlistData.disableClientLogs) {
-                const itemUrl = page.url || (page.zones && page.zones[0]?.url) || 'Page composite';
+                // Déterminer un nom de média/page lisible et détaillé (avec décomposition des zones pour les pages composites)
+                let itemUrl = page.name || page.title || page.data?.name || page.data?.title;
+                if (!itemUrl) {
+                    if (page.url) {
+                        itemUrl = page.url;
+                    } else if (page.data && (page.data.videoUrl || page.data.imageUrl)) {
+                        itemUrl = page.data.videoUrl || page.data.imageUrl;
+                    } else {
+                        const zones = page.zones || page.data?.zones || [];
+                        if (zones.length > 0) {
+                            const zoneDescs = zones.map(z => {
+                                const rawPath = z.mediaUrl || z.url || z.src || '';
+                                const cleanName = rawPath ? rawPath.split('/').pop().split('?')[0].replace(/^(yt|img|pptx|zip|pdf|media|file)_\d+_/i, '') : '';
+                                const label = z.title || z.name || cleanName || z.type || 'Zone';
+                                const typeTag = z.type ? `[${z.type}]` : '';
+                                return `${typeTag} ${label}`.trim();
+                            }).filter(Boolean);
+                            itemUrl = `Page composite (${zones.length} zones: ${zoneDescs.slice(0, 3).join(' + ')})`;
+                        } else {
+                            itemUrl = 'Page composite (Multi-zones)';
+                        }
+                    }
+                } else {
+                    const zones = page.zones || page.data?.zones || [];
+                    if (zones.length > 0) {
+                        itemUrl = `Composite "${itemUrl}" (${zones.length} zones)`;
+                    }
+                }
                 
                 // On utilise les infos provenant du manifest local (playlist.json)
                 const targetServerUrl = playlistData.serverUrl || serverUrl;
@@ -587,6 +762,116 @@
             // Effacer les zones précédentes
             pageZonesContainer.innerHTML = '';
 
+            // Rendu des modèles
+            if (page.template) {
+                const tpl = document.createElement('div');
+                tpl.className = 'tpl-container anim-fade-in';
+                const targetServerUrl = playlistData.serverUrl || serverUrl;
+
+                if (page.template === 'canteen') {
+                    const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+                    const today = dayNames[new Date().getDay()];
+                    
+                    if (page.data.useLiveMenu) {
+                        tpl.innerHTML = `<div class="tpl-header">Chargement du menu...</div>`;
+                        fetch(`${targetServerUrl}/api/player/canteen/current`)
+                            .then(r => r.json())
+                            .then(weekData => {
+                                const menu = weekData[today] || { starter: '...', main: '...', dessert: '...' };
+                                tpl.innerHTML = `
+                                    <div class="tpl-header">${page.data.title || 'MENU DU JOUR'} (${today})</div>
+                                    <div class="tpl-content">
+                                        <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${menu.starter}</div></div>
+                                        <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${menu.main}</div></div>
+                                        <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${menu.dessert}</div></div>
+                                    </div>`;
+                            }).catch(() => { tpl.innerHTML = '<div class="tpl-header">Menu indisponible</div>'; });
+                    } else {
+                        tpl.innerHTML = `
+                            <div class="tpl-header">${page.data.title || 'MENU'}</div>
+                            <div class="tpl-content">
+                                <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${page.data.starter}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${page.data.main}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${page.data.dessert}</div></div>
+                            </div>`;
+                    }
+                } else if (page.template === 'meeting') {
+                    const statusClass = (page.data.status || '').toLowerCase();
+                    tpl.innerHTML = `
+                        <div class="tpl-meeting-room">${page.data.room}</div>
+                        <div style="font-size: 3vw; opacity: 0.8;">${page.data.subject || ''}</div>
+                        <div class="tpl-meeting-status status-${statusClass}">${page.data.status}</div>`;
+                }
+                else if (page.template === 'video_fullscreen') {
+                    const videoUrl = page.data.localVideoUrl || page.data.videoUrl;
+                    let finalUrl = videoUrl;
+                    if (videoUrl && videoUrl.startsWith('/media') && !page.data.localVideoUrl) {
+                        finalUrl = `${targetServerUrl}${videoUrl}${playlistData.apiKey ? '?apiKey=' + playlistData.apiKey : ''}`;
+                    }
+                    tpl.style.padding = '0';
+                    const isMuted = page.data.muted === true;
+                    const fitMode = page.data.fitMode || 'cover';
+                    tpl.innerHTML = `
+                        <video src="${finalUrl}" autoplay playsinline muted ${page.data.loop ? 'loop' : ''} 
+                               style="width:100%; height:100%; object-fit:${fitMode}; pointer-events:none;"></video>
+                        ${page.data.legend ? `
+                            <div style="position:absolute; bottom:0; left:0; width:100%; background:rgba(0,0,0,0.7); 
+                                        color:${page.data.legendColor || 'white'}; 
+                                        font-family:${page.data.legendFontFamily || 'sans-serif'};
+                                        padding:2vh; font-size:${(page.data.legendFontSize || 40) / 10}vw; 
+                                        text-align:center; z-index:10;">${page.data.legend}</div>` : ''}
+                    `;
+                } else if (page.template === 'weather') {
+                    const city = page.data.city || 'Paris';
+                    const lat = page.data.lat || '48.8566';
+                    const lon = page.data.lon || '2.3522';
+                    tpl.innerHTML = `<div class="tpl-header">MÉTÉO - ${city.toUpperCase()}</div><div id="weather-loader" style="font-size: 2vw;">Chargement des prévisions...</div>`;
+                    
+                    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=weathercode,temperature_2m&timezone=auto`)
+                        .then(r => r.json())
+                        .then(data => {
+                            const loader = tpl.querySelector('#weather-loader');
+                            if (loader) loader.remove();
+                            
+                            const periods = [
+                                { label: 'MATIN', timeLabel: '9h', index: 9 },
+                                { label: 'MIDI', timeLabel: '12h', index: 12 },
+                                { label: 'APRÈS-MIDI', timeLabel: '16h', index: 16 }
+                            ];
+                            
+                            const grid = document.createElement('div');
+                            grid.style.cssText = "display:flex; gap:2vw; justify-content:center; width:90%;";
+                            
+                            periods.forEach(p => {
+                                const icon = getWeatherIcon(data.hourly.weathercode[p.index]);
+                                const temp = Math.round(data.hourly.temperature_2m[p.index]);
+                                grid.innerHTML += `
+                                    <div style="background:rgba(255,255,255,0.1); padding:2vh; border-radius:20px; flex:1; text-align:center;">
+                                        <div style="font-size:1.5vw; color:#3498db; font-weight:bold; margin-bottom:0.5vh;">${p.label}</div>
+                                        <div style="font-size:1.2vw; opacity:0.6; margin-bottom:1vh;">${p.timeLabel}</div>
+                                        <div style="font-size:4vw; margin:1vh 0;">${icon}</div>
+                                        <div style="font-size:2.2vw; font-weight:bold;">${temp}°</div>
+                                    </div>`;
+                            });
+                            tpl.appendChild(grid);
+                        }).catch(() => { tpl.innerHTML = '<div class="tpl-header">Météo indisponible</div>'; });
+                }
+
+                pageZonesContainer.appendChild(tpl);
+
+                if (page.template === 'video_fullscreen') {
+                    const v = tpl.querySelector('video');
+                    const isMuted = page.data.muted === true;
+                    // Démarre toujours en muet (contourne la politique autoplay du navigateur)
+                    v.muted = true;
+                    v.play().then(() => {
+                        if (!isMuted) v.muted = false;
+                    }).catch(e => {
+                        console.warn("Autoplay vidéo échoué:", e);
+                    });
+                }
+            }
+
             // Rendre les zones pour la page actuelle
             if (page.zones && page.zones.length > 0) {
                 page.zones.forEach(zone => {
@@ -617,8 +902,9 @@
                     // On utilise le chemin local si disponible, sinon le chemin distant avec l'URL du serveur
                     let mediaUrl = zone.localUrl || zone.url || "";
                     const token = apiKey || (playlistData && playlistData.apiKey);
-                    if (mediaUrl.startsWith('/media') || mediaUrl.startsWith('/api/')) {
-                        mediaUrl = `${serverUrl}${mediaUrl}${token ? (mediaUrl.includes('?') ? '&' : '?') + 'apiKey=' + token : ''}`;
+                    const targetServerUrl = playlistData.serverUrl || serverUrl;
+                    if (mediaUrl.startsWith('/') && !mediaUrl.startsWith('./')) {
+                        mediaUrl = `${targetServerUrl}${mediaUrl}${token ? (mediaUrl.includes('?') ? '&' : '?') + 'apiKey=' + token : ''}`;
                     }
 
                     if (zone.type === 'image') {
@@ -630,10 +916,15 @@
                         videoElement.muted = true; // Démarre muet pour contourner la politique autoplay
                         videoElement.loop = true;
                         videoElement.playsInline = true;
+                        videoElement.dataset.muted = zone.muted ? 'true' : 'false';
                         zoneElement.appendChild(videoElement);
                         // Dé-muter après lancement si le son est souhaité
                         videoElement.play().then(() => {
-                            if (!zone.muted) videoElement.muted = false;
+                            if (!zone.muted) {
+                                videoElement.muted = false;
+                                const currentVolume = playlistData.volume !== undefined ? playlistData.volume : 100;
+                                videoElement.volume = currentVolume / 100;
+                            }
                         }).catch(() => { /* reste muet si lecture impossible */ });
                     } else if (zone.type === 'web') {
                         const zoom = zone.webZoom || 1.0;
@@ -645,8 +936,10 @@
                         </div>`;
                     } else if (zone.type === 'qrcode') {
                         const qrText = zone.text || 'https://omnisign.com';
-                        const qrUrl = zone.localUrl ? mediaUrl : `${serverUrl}/api/admin/qrcode?text=${encodeURIComponent(qrText)}${token ? '&apiKey=' + token : ''}`;
-                        zoneElement.innerHTML = `<img src="${qrUrl}" style="width:100%;height:100%;object-fit:contain;">`;
+                        const targetServerUrl = playlistData.serverUrl || serverUrl;
+                        const remoteQrUrl = `${targetServerUrl}/api/admin/qrcode?text=${encodeURIComponent(qrText)}${token ? '&apiKey=' + token : ''}`;
+                        const qrUrl = zone.localUrl ? mediaUrl : remoteQrUrl;
+                        zoneElement.innerHTML = `<img src="${qrUrl}" onerror="if(!this.dataset.fallback){this.dataset.fallback=true;this.src='${remoteQrUrl}';}" style="width:100%;height:100%;object-fit:contain;">`;
                     } else if (zone.type === 'text') {
                         const content = zone.isMarquee ? 
                             `<div class="marquee-container"><div class="marquee-content text-content">${zone.text || ''}</div></div>` :
@@ -718,51 +1011,154 @@
                         updateTime();
                         activeClockIntervals.push(setInterval(updateTime, 1000));
                     }
-                    
+                    // Gestion du timing d'apparition (start) et de disparition (duration)
+                    const startMs = zone.start || 0;
+                    const durationMs = zone.duration || page.duration || 5000;
+                    const endMs = startMs + durationMs;
+
+                    if (startMs > 0) {
+                        zoneElement.style.display = 'none';
+                        setTimeout(() => {
+                            zoneElement.style.display = 'block';
+                            const videoElement = zoneElement.querySelector('video');
+                            if (videoElement) {
+                                videoElement.play().then(() => {
+                                    if (!zone.muted) videoElement.muted = false;
+                                }).catch(() => {});
+                            }
+                        }, startMs);
+                    }
+
                     // Programmer l'animation de sortie
                     if (zone.animationOut && zone.animationOut !== 'none') {
                         const outDuration = zone.animationOutDuration || 800;
                         setTimeout(() => {
                             zoneElement.classList.add(`anim-${zone.animationOut}`);
                             zoneElement.style.animationDuration = outDuration + 'ms';
-                        }, Math.max(0, page.duration - outDuration));
+                        }, Math.max(0, endMs - outDuration));
                     }
+
+                    setTimeout(() => {
+                        zoneElement.style.display = 'none';
+                    }, endMs);
 
                     pageZonesContainer.appendChild(zoneElement);
                 });
             }
 
-            // Logique de progression
-            if (currentIndex === playlistData.items.length - 1 && playlistData.sequenceContext && socket) {
-                playTimeout = setTimeout(() => {
+            // Logique de progression (Timeout ou Fin de vidéo)
+            const moveToNext = () => {
+                if (currentIndex === playlistData.items.length - 1 && playlistData.sequenceContext && socket) {
                     socket.emit('request-next-playlist-in-sequence');
-                }, page.duration);
+                } else {
+                    currentIndex = (currentIndex + 1) % playlistData.items.length;
+                    playNext();
+                }
+            };
+
+            const videoTpl = pageZonesContainer.querySelector('video');
+            if (page.template === 'video_fullscreen' && videoTpl && !page.data.loop) {
+                log(`Attente de la fin de la vidéo pour transition.`);
+                videoTpl.onended = moveToNext;
+                videoTpl.onerror = () => {
+                    log("Erreur de chargement de la vidéo full-screen", true);
+                    moveToNext();
+                };
             } else {
-                currentIndex = (currentIndex + 1) % playlistData.items.length;
-                playTimeout = setTimeout(playNext, page.duration);
+                playTimeout = setTimeout(moveToNext, page.duration);
                 log(`Page suivante dans ${page.duration / 1000}s.`);
             }
         }
 
+        function getAlertIcon(type) {
+            if (type === 'danger') return '🚨';
+            if (type === 'warning') return '⚠️';
+            return 'ℹ️';
+        }
+
+        const alertTimers = {};
+
+        function displayAlert(alert) {
+            const overlay = document.getElementById('alert-overlay');
+            if (document.getElementById(`alert-${alert.id}`)) return;
+
+            const div = document.createElement('div');
+            div.id = `alert-${alert.id}`;
+            div.className = `flash-message flash-${alert.type}`;
+            
+            div.innerHTML = `
+                <span style="flex-shrink: 0; font-size: 2.5vw;">${getAlertIcon(alert.type)}</span>
+                <div class="marquee-wrapper" style="flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 100%; display: flex; align-items: center;">
+                    <div id="marquee-text-${alert.id}" style="display: inline-block; white-space: nowrap; font-size: 2.5vw; font-weight: bold; position: relative; will-change: transform;">${alert.text}</div>
+                </div>
+            `;
+            overlay.appendChild(div);
+
+            const textEl = document.getElementById(`marquee-text-${alert.id}`);
+            const wrapperEl = textEl.parentElement;
+
+            let offset = wrapperEl.offsetWidth || window.innerWidth;
+            const speed = 2.5; // Vitesse de défilement (pixels par trame à 60 FPS)
+
+            function step() {
+                if (!document.getElementById(`alert-${alert.id}`)) return;
+                offset -= speed;
+                const textWidth = textEl.offsetWidth || 300;
+                const containerWidth = wrapperEl.offsetWidth || window.innerWidth;
+
+                if (offset < -textWidth) {
+                    offset = containerWidth;
+                }
+                textEl.style.transform = `translate3d(${offset}px, 0, 0)`;
+                alertTimers[alert.id] = requestAnimationFrame(step);
+            }
+
+            requestAnimationFrame(() => {
+                offset = wrapperEl.offsetWidth || window.innerWidth;
+                step();
+            });
+        }
+
+        function removeAlert(alertId) {
+            if (alertTimers[alertId]) {
+                cancelAnimationFrame(alertTimers[alertId]);
+                delete alertTimers[alertId];
+            }
+            const el = document.getElementById(`alert-${alertId}`);
+            if (el) el.remove();
+        }
+
+        function renderAlertsFromManifest(alerts) {
+            const overlay = document.getElementById('alert-overlay');
+            const currentAlertIds = alerts.map(a => `alert-${a.id}`);
+            
+            Array.from(overlay.children).forEach(child => {
+                if (!currentAlertIds.includes(child.id)) {
+                    const rawId = child.id.replace('alert-', '');
+                    removeAlert(rawId);
+                }
+            });
+
+            alerts.forEach(displayAlert);
+        }
+
         function setupSocketListeners() {
             if (!socket) return;
-            socket.on('show-alert', (alert) => {
-                const overlay = document.getElementById('alert-overlay');
-                if (document.getElementById(`alert-${alert.id}`)) return;
-                const div = document.createElement('div');
-                div.id = `alert-${alert.id}`;
-                div.className = `flash-message flash-${alert.type}`;
-                div.innerText = alert.text;
-                overlay.appendChild(div);
-            });
-            socket.on('clear-alert', (id) => {
-                const el = document.getElementById(`alert-${id}`);
-                if (el) el.remove();
-            });
+            socket.on('show-alert', (alert) => displayAlert(alert));
+            socket.on('clear-alert', (id) => removeAlert(id));
             // Ajout de l'écoute des mises à jour de playlist pour une transition immédiate
             socket.on('playlist-updated', (data) => {
                 log("Mise à jour immédiate reçue via Socket.");
                 refreshPlaylist();
+            });
+            socket.on('volume-change', (data) => {
+                log(`Volume mis à jour via Socket : ${data.volume}%`);
+                playlistData.volume = data.volume;
+                document.querySelectorAll('video').forEach(v => {
+                    if (v.dataset.muted !== 'true') {
+                        v.volume = data.volume / 100;
+                    }
+                });
             });
         }
 
@@ -791,8 +1187,23 @@
                 .replace(/aa/g, yearShort);
         }
 
+        function getWeatherIcon(code) {
+            if (code === 0) return '☀️';
+            if (code <= 3) return '☁️';
+            if (code <= 48) return '🌫️';
+            if (code <= 55) return '🌦️';
+            if (code <= 65) return '🌧️';
+            if (code <= 77) return '❄️';
+            if (code <= 82) return '🌦️';
+            if (code <= 99) return '⛈️';
+            return '❓';
+        }
+
+        // Démarrage de la détection socket
+        loadSocketIO(serverUrl);
+
         // On vérifie les mises à jour du fichier JSON toutes les 30s
-        setInterval(refreshPlaylist, 30000);
+        // setInterval(refreshPlaylist, 30000);
         refreshPlaylist();
     </script>
 </body>

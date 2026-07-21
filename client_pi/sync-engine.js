@@ -151,6 +151,29 @@ async function getNetworkInfo() {
         if (signal) info.signal = signal;
     } catch (e) { /* Pas de WiFi ou interface wlan0 absente */ }
 
+    info.platform = 'Raspberry Pi';
+
+    // Télémétrie de santé (RAM, Disque, Température CPU)
+    try {
+        info.totalMem = Math.round(os.totalmem() / 1024 / 1024);
+        info.freeMem = Math.round(os.freemem() / 1024 / 1024);
+
+        const { stdout: dfOut } = await execPromise("df -m . | tail -n 1");
+        const parts = dfOut.trim().split(/\s+/);
+        if (parts.length >= 4) {
+            info.diskTotal = Math.round(parseInt(parts[1]) / 1024);
+            info.diskFree = Math.round(parseInt(parts[3]) / 1024);
+        }
+
+        const { stdout: tempOut } = await execPromise("vcgencmd measure_temp || cat /sys/class/thermal/thermal_zone0/temp || echo ''");
+        if (tempOut.includes('temp=')) {
+            info.cpuTemp = parseFloat(tempOut.replace("temp=", "").replace("'C", "").trim());
+        } else if (tempOut.trim()) {
+            const val = parseFloat(tempOut.trim());
+            info.cpuTemp = val > 1000 ? Math.round(val / 1000) : val;
+        }
+    } catch (e) {}
+
     return info;
 }
 
@@ -316,14 +339,27 @@ async function syncPlaylist(playlistData) {
     playlistData.apiKey = API_KEY;
     playlistData.activeAlerts = activeAlerts;
 
-    // On écrit le fichier que le HTML va lire
+    playlistData.serverOnline = true;
     await fs.writeJson(LOCAL_MANIFEST, playlistData);
     await fs.chmod(LOCAL_MANIFEST, 0o644);
     socket.emit('player-status-update', { downloading: false });
     console.log('✅ Playlist locale à jour.');
 }
 
+async function setServerStatus(isOnline) {
+    try {
+        if (await fs.pathExists(LOCAL_MANIFEST)) {
+            const manifest = await fs.readJson(LOCAL_MANIFEST);
+            if (manifest.serverOnline !== isOnline) {
+                manifest.serverOnline = isOnline;
+                await fs.writeJson(LOCAL_MANIFEST, manifest, { spaces: 2 });
+            }
+        }
+    } catch (e) {}
+}
+
 socket.on('connect', async () => {
+    await setServerStatus(true);
     console.log(`Connecté au CMS en tant que ${DEVICE_ID}`);
     // Envoyer les infos réseau au serveur
     const network = await getNetworkInfo();
@@ -342,6 +378,25 @@ socket.on('connect', async () => {
     const freeMem = Math.round(os.freemem() / 1024 / 1024);
     console.log(`📊 Mémoire système : ${freeMem}MB libres / ${totalMem}MB au total`);
     socket.emit('player-info-update', network);
+});
+
+// Envoi périodique de la télémétrie de santé au serveur (toutes les minutes)
+setInterval(async () => {
+    if (socket && socket.connected) {
+        try {
+            const network = await getNetworkInfo();
+            socket.emit('player-info-update', network);
+        } catch (e) {}
+    }
+}, 60000);
+
+socket.on('disconnect', async (reason) => {
+    console.log(`🔌 Connexion au CMS perdue (${reason})`);
+    await setServerStatus(false);
+});
+
+socket.on('connect_error', async (err) => {
+    await setServerStatus(false);
 });
 
 // --- GESTION DES ALERTES FLASH ---
@@ -403,7 +458,8 @@ socket.on('playlist-updated', async (playlistData) => {
 
 // Écouter les commandes de contrôle de l'écran
 socket.on('volume-change', (data) => {
-    const vol = data.volume;
+    const rawVal = parseInt(data.volume);
+    const vol = isNaN(rawVal) ? 100 : Math.max(0, Math.min(100, rawVal));
     console.log(`🔊 Commande de volume reçue : ${vol}%`);
     // Ajuster le volume système sur le Pi (Master, HDMI, PulseAudio ou PipeWire)
     const volDec = (vol / 100).toFixed(2);

@@ -75,7 +75,7 @@ input, select, textarea {
     border: 1px solid var(--border-color) !important;
 }
 
-.stat-card, .player-card, .playlist-card, .media-card, .list-item {
+.stat-card, .player-card, .playlist-card, .media-card, .list-item, .schedule-card {
     background: var(--card-bg) !important;
     color: var(--text-primary) !important;
     box-shadow: 0 4px 6px var(--shadow-color) !important;
@@ -86,10 +86,27 @@ input, select, textarea {
     color: var(--text-secondary) !important;
 }
 
+nav button {
+    padding: 10px 15px !important;
+    border-radius: 4px !important;
+    cursor: pointer !important;
+    font-size: 14px !important;
+    font-weight: bold !important;
+    background: var(--accent-color, #3498db) !important;
+    color: #ffffff !important;
+    border: 1px solid var(--accent-color, #3498db) !important;
+    transition: all 0.2s ease !important;
+}
+
 nav button.secondary {
     background: var(--nav-btn-bg) !important;
     color: var(--text-primary) !important;
     border: 1px solid var(--border-color) !important;
+    font-weight: normal !important;
+}
+
+nav button:hover {
+    opacity: 0.9;
 }
 
 footer {

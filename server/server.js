@@ -231,19 +231,62 @@ async function initializeDatabase() {
             });
             console.log('Colonne "latestScreenshot" ajoutée à la table "players".');
         }
+
+        // Migration : Ajout des colonnes de télémétrie et de santé (RAM, Disque, Temp CPU)
+        const hasHealthCols = await db.schema.hasColumn('players', 'totalMem');
+        if (!hasHealthCols) {
+            await db.schema.table('players', (table) => {
+                table.integer('totalMem');
+                table.integer('freeMem');
+                table.integer('diskTotal');
+                table.integer('diskFree');
+                table.float('cpuTemp');
+                table.string('lastHealthAlertSent');
+            });
+            console.log('Colonnes de télémétrie et santé ajoutées à la table "players".');
+        }
     });
 
     await db.schema.hasTable('schedules').then(async (exists) => {
         if (!exists) {
             await db.schema.createTable('schedules', (table) => {
                 table.string('id').primary();
-                table.string('deviceId').notNullable();
+                table.string('name').notNullable();
+                table.string('targetType').defaultTo('player'); // 'player', 'group', 'global'
+                table.string('targetId'); // deviceId or groupId
+                table.string('deviceId'); // Backwards compatibility
                 table.string('playlistId'); // Can be null if sequenceId is set
                 table.string('sequenceId'); // Can be null if playlistId is set
-                table.timestamp('startTime').notNullable();
-                table.timestamp('endTime').notNullable();
+                table.string('scheduleType').defaultTo('recurring'); // 'recurring' or 'date_range'
+                table.string('daysOfWeek').defaultTo('[1,2,3,4,5]'); // JSON string of days [1=Mon..7=Sun]
+                table.string('timeStart').defaultTo('00:00'); // HH:mm
+                table.string('timeEnd').defaultTo('23:59'); // HH:mm
+                table.string('startDate'); // YYYY-MM-DD for date_range
+                table.string('endDate'); // YYYY-MM-DD for date_range
+                table.integer('priority').defaultTo(10);
+                table.boolean('active').defaultTo(true);
+                table.timestamp('startTime');
+                table.timestamp('endTime');
             });
-            console.log('Table "schedules" created.');
+            console.log('Table "schedules" créée avec support de la planification avancée.');
+        } else {
+            const hasName = await db.schema.hasColumn('schedules', 'name');
+            if (!hasName) {
+                await db.schema.table('schedules', (table) => {
+                    table.string('name').defaultTo('Règle de diffusion');
+                    table.string('targetType').defaultTo('player');
+                    table.string('targetId');
+                    table.string('scheduleType').defaultTo('recurring');
+                    table.string('daysOfWeek').defaultTo('[1,2,3,4,5]');
+                    table.string('timeStart').defaultTo('00:00');
+                    table.string('timeEnd').defaultTo('23:59');
+                    table.string('startDate');
+                    table.string('endDate');
+                    table.integer('priority').defaultTo(10);
+                    table.boolean('active').defaultTo(true);
+                });
+                console.log('Colonnes de planification avancée ajoutées à la table "schedules".');
+            }
         }
     });
 
@@ -547,17 +590,72 @@ const checkSchedules = async (targetDeviceId = null, forceEmit = false) => {
         // Envoyer la commande de mise en veille/réveil à l'écran
         io.to(deviceId).emit('screen-command', { action: isAwakeTime ? 'on' : 'off' });
 
-        let activeSchedule = null;
-        for (const schedule of schedules) {
-            if (schedule.deviceId === deviceId) {
-                const start = new Date(schedule.startTime);
-                const end = new Date(schedule.endTime);
-                if (now >= start && now < end) {
-                    activeSchedule = schedule;
-                    break;
+        // Filtrer les planifications applicables à cet écran (par deviceId, par groupId ou globales)
+        const matchingSchedules = schedules.filter(s => {
+            // Règle active ?
+            if (s.active === 0 || s.active === false || s.active === 'false') return false;
+
+            // Vérification de la cible (Écran spécifique, Groupe d'écrans, ou Global)
+            const isTargetMatch = 
+                (s.targetType === 'player' && (s.targetId === deviceId || s.deviceId === deviceId)) ||
+                (s.targetType === 'group' && s.targetId && s.targetId === player.groupId) ||
+                (s.targetType === 'global' || !s.targetType);
+            
+            if (!isTargetMatch) return false;
+
+            // Déterminer le jour actuel (1=Lundi..7=Dimanche)
+            const currentDayNum = now.getDay() === 0 ? 7 : now.getDay();
+            const currentDateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+            if (s.scheduleType === 'recurring' || (!s.scheduleType && !s.startDate && !s.startTime)) {
+                // Vérifier les jours de la semaine
+                let days = [1, 2, 3, 4, 5];
+                try {
+                    days = typeof s.daysOfWeek === 'string' ? JSON.parse(s.daysOfWeek) : (s.daysOfWeek || [1, 2, 3, 4, 5]);
+                } catch (e) {}
+                if (Array.isArray(days) && !days.includes(currentDayNum)) return false;
+
+                // Vérifier la plage horaire HH:mm
+                const start = s.timeStart || '00:00';
+                const end = s.timeEnd || '23:59';
+                if (start <= end) {
+                    if (currentTimeStr < start || currentTimeStr > end) return false;
+                } else { // Traitement pour créneau de nuit chevauchant minuit (ex: 22:00 à 06:00)
+                    if (currentTimeStr < start && currentTimeStr > end) return false;
                 }
+                return true;
+            } else if (s.scheduleType === 'date_range' || s.startDate) {
+                // Vérifier la plage de dates
+                if (s.startDate && currentDateStr < s.startDate) return false;
+                if (s.endDate && currentDateStr > s.endDate) return false;
+
+                // Si des heures spécifiques sont aussi définies pour l'événement
+                if (s.timeStart && s.timeEnd) {
+                    if (s.timeStart <= s.timeEnd) {
+                        if (currentTimeStr < s.timeStart || currentTimeStr > s.timeEnd) return false;
+                    } else {
+                        if (currentTimeStr < s.timeStart && currentTimeStr > s.timeEnd) return false;
+                    }
+                }
+                return true;
+            } else if (s.startTime && s.endTime) {
+                // Retrocompatibilité pour anciens enregistrements ISO
+                const start = new Date(s.startTime);
+                const end = new Date(s.endTime);
+                return now >= start && now < end;
             }
-        }
+
+            return false;
+        });
+
+        // Trier par priorité décroissante (les règles à priorité élevée comme 100 prévalent sur la priorité normale 10)
+        matchingSchedules.sort((a, b) => {
+            const prioA = parseInt(a.priority) || 10;
+            const prioB = parseInt(b.priority) || 10;
+            return prioB - prioA;
+        });
+
+        const activeSchedule = matchingSchedules.length > 0 ? matchingSchedules[0] : null;
 
         // Déterminer si on joue une playlist directe ou une séquence
         let activeSequenceId = activeSchedule ? activeSchedule.sequenceId : (player.manualSequenceId || null);
@@ -814,6 +912,7 @@ app.post('/api/player/log', authMiddleware, (req, res) => {
 
 // API Admin : Statistiques de diffusion
 app.get('/api/admin/analytics', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { groupId, deviceId } = req.query;
     let query = db('analytics')
         .join('players', 'analytics.deviceId', '=', 'players.id')
         .select('analytics.itemUrl')
@@ -823,12 +922,20 @@ app.get('/api/admin/analytics', authMiddleware, checkRole(['admin', 'editor']), 
         .orderBy('count', 'desc')
         .limit(50);
 
+    if (groupId) {
+        query.where('players.group', groupId);
+    }
+    if (deviceId) {
+        query.where('analytics.deviceId', deviceId);
+    }
+
     filterBySiteId(query, req.user, 'players.siteId')
         .then(stats => res.json(stats))
         .catch(err => res.status(500).send(err.message));
 });
 
 app.get('/api/admin/analytics/hourly', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { groupId, deviceId } = req.query;
     let query = db('analytics')
         .join('players', 'analytics.deviceId', '=', 'players.id')
         .select(db.raw("strftime('%H', analytics.timestamp, 'localtime') as hour"))
@@ -836,6 +943,13 @@ app.get('/api/admin/analytics/hourly', authMiddleware, checkRole(['admin', 'edit
         .where('analytics.timestamp', '>', db.raw("datetime('now', '-24 hours')"))
         .groupBy('hour')
         .orderBy('hour', 'asc');
+
+    if (groupId) {
+        query.where('players.group', groupId);
+    }
+    if (deviceId) {
+        query.where('analytics.deviceId', deviceId);
+    }
 
     filterBySiteId(query, req.user, 'players.siteId')
         .then(stats => {
@@ -1138,25 +1252,63 @@ app.get('/api/admin/users', authMiddleware, checkRole(['admin']), (req, res) => 
     db('users').select('id', 'username', 'role', 'email', 'siteId').then(users => res.json(users)).catch(err => res.status(500).send('Error fetching users'));
 });
 
-// API Admin : Gestion des agendas
-app.get('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
-    let query = db('schedules')
-        .join('players', 'schedules.deviceId', '=', 'players.id')
-        .select('schedules.*');
+// Route pour le planning / agenda de diffusion
+app.get('/planning', (req, res) => {
+    res.sendFile(path.join(__dirname, 'planning.html'));
+});
 
-    filterBySiteId(query, req.user, 'players.siteId')
+// API Admin : Gestion des agendas / planifications
+app.get('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    db('schedules').select('*')
         .then(schedules => res.json(schedules))
         .catch(err => res.status(500).send('Error fetching schedules: ' + err.message));
 });
 
 app.post('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
-    const { id, deviceId, playlistId, sequenceId, startTime, endTime } = req.body;
-    if (!deviceId || (!playlistId && !sequenceId) || !startTime || !endTime) {
-        return res.status(400).send('Données manquantes pour la planification.');
+    const { 
+        id, 
+        name, 
+        targetType, 
+        targetId, 
+        deviceId, 
+        playlistId, 
+        sequenceId, 
+        scheduleType, 
+        daysOfWeek, 
+        timeStart, 
+        timeEnd, 
+        startDate, 
+        endDate, 
+        priority, 
+        active, 
+        startTime, 
+        endTime 
+    } = req.body;
+
+    if (!name || (!playlistId && !sequenceId)) {
+        return res.status(400).send('Données manquantes pour la planification (nom et contenu requis).');
     }
 
     const scheduleId = id || `sch_${Date.now()}`;
-    const newSchedule = { id: scheduleId, deviceId, playlistId, sequenceId, startTime, endTime };
+    const newSchedule = {
+        id: scheduleId,
+        name: name || 'Règle de diffusion',
+        targetType: targetType || 'player',
+        targetId: targetId || deviceId || null,
+        deviceId: targetId || deviceId || null,
+        playlistId: playlistId || null,
+        sequenceId: sequenceId || null,
+        scheduleType: scheduleType || 'recurring',
+        daysOfWeek: Array.isArray(daysOfWeek) ? JSON.stringify(daysOfWeek) : (daysOfWeek || '[1,2,3,4,5]'),
+        timeStart: timeStart || '00:00',
+        timeEnd: timeEnd || '23:59',
+        startDate: startDate || null,
+        endDate: endDate || null,
+        priority: priority !== undefined ? parseInt(priority) : 10,
+        active: active !== undefined ? (active ? 1 : 0) : 1,
+        startTime: startTime || null,
+        endTime: endTime || null
+    };
 
     db('schedules').where({ id: scheduleId }).first()
         .then(async (existingSchedule) => {
@@ -1165,9 +1317,23 @@ app.post('/api/admin/schedules', authMiddleware, checkRole(['admin', 'editor']),
             } else {
                 await db('schedules').insert(newSchedule);
             }
-            await checkSchedules(); // Re-evaluate schedules immediately
+            await checkSchedules(null, true); // Re-evaluate schedules immediately for all screens
             res.json({ success: true, scheduleId });
-        }).catch(err => res.status(500).send('Error saving schedule: ' + err.message));
+        })
+        .catch(err => res.status(500).send('Error saving schedule: ' + err.message));
+});
+
+app.put('/api/admin/schedules/:id/toggle', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
+    const { id } = req.params;
+    db('schedules').where({ id }).first()
+        .then(async (schedule) => {
+            if (!schedule) return res.status(404).send('Planification non trouvée');
+            const newActiveState = schedule.active ? 0 : 1;
+            await db('schedules').where({ id }).update({ active: newActiveState });
+            await checkSchedules(null, true);
+            res.json({ success: true, active: !!newActiveState });
+        })
+        .catch(err => res.status(500).send('Error toggling schedule: ' + err.message));
 });
 
 app.delete('/api/admin/schedules/:id', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
@@ -1175,7 +1341,7 @@ app.delete('/api/admin/schedules/:id', authMiddleware, checkRole(['admin', 'edit
     db('schedules').where({ id }).del()
         .then(async (count) => {
             if (count > 0) {
-                await checkSchedules(); // Re-evaluate schedules immediately
+                await checkSchedules(null, true); // Re-evaluate schedules immediately for all screens
                 res.json({ success: true });
             } else {
                 res.status(404).send('Planification non trouvée');
@@ -2151,10 +2317,10 @@ app.post('/api/admin/assign', authMiddleware, checkRole(['admin', 'editor']), (r
 
 // Socket.io avec authentification et gestion de salon (Room)
 io.use((socket, next) => {
-    const authHeader = socket.handshake.auth.token; // Peut être API_KEY ou JWT
+    const authHeader = socket.handshake.auth.token || socket.handshake.auth.apiKey; // Peut être API_KEY ou JWT
     const deviceId = socket.handshake.query.deviceId;
 
-    // Authentification pour les clients Pi (API Key)
+    // Authentification pour les clients Pi / Windows / Linux (API Key)
     if (authHeader === API_KEY) return next();
 
     // Authentification pour les clients Admin (JWT)
@@ -2205,8 +2371,18 @@ io.on('connection', async (socket) => {
     
     socket.join(deviceId);
     
+    let defaultName = `Nouveau Client (${deviceId})`;
+    const devLower = deviceId.toLowerCase();
+    if (devLower.includes('win') || devLower.includes('pc') || devLower.includes('stick')) {
+        defaultName = `Nouveau PC Windows (${deviceId})`;
+    } else if (devLower.includes('linux') || devLower.includes('mint')) {
+        defaultName = `Nouveau PC Linux (${deviceId})`;
+    } else if (devLower.includes('pi') || devLower.includes('rpi')) {
+        defaultName = `Nouveau Pi (${deviceId})`;
+    }
+
     const lastSeen = new Date();
-    db('players').insert({ id: deviceId, name: `Nouveau Pi (${deviceId})`, status: 'pending', lastSeen, downloadStatus: '{}' })
+    db('players').insert({ id: deviceId, name: defaultName, status: 'pending', lastSeen, downloadStatus: '{}' })
      .onConflict('id').merge({ lastSeen: lastSeen }) // Only update lastSeen on conflict
         .then(async () => { // Use async here
             console.log(`Player ${deviceId} connected (Updated lastSeen)`);
@@ -2273,16 +2449,34 @@ io.on('connection', async (socket) => {
         }
     });
 
-    // Mise à jour des infos réseau (IP/MAC)
-    socket.on('player-info-update', (info) => {
-        db('players').where({ id: deviceId }).update({ 
-            ip: info.ip, 
-            mac: info.mac,
-            wifiSSID: info.ssid,
-            wifiSignal: info.signal
-        })
-            .then(() => console.log(`Player ${deviceId} info updated: IP=${info.ip} | HW Accel: ${info.gpu || 'Inconnu'}`))
-            .catch(err => console.error(`Error updating player info for ${deviceId}:`, err));
+    // Mise à jour des infos réseau (IP/MAC), plateforme et télémétrie de santé
+    socket.on('player-info-update', async (info) => {
+        try {
+            const player = await db('players').where({ id: deviceId }).first();
+            const updateData = {
+                ip: info.ip,
+                mac: info.mac,
+                wifiSSID: info.ssid,
+                wifiSignal: info.signal
+            };
+
+            if (info.totalMem !== undefined) updateData.totalMem = info.totalMem;
+            if (info.freeMem !== undefined) updateData.freeMem = info.freeMem;
+            if (info.diskTotal !== undefined) updateData.diskTotal = info.diskTotal;
+            if (info.diskFree !== undefined) updateData.diskFree = info.diskFree;
+            if (info.cpuTemp !== undefined) updateData.cpuTemp = info.cpuTemp;
+
+            // Mettre à jour le nom par défaut si le nom contient la valeur initiale générique "Nouveau Pi" / "Nouveau Client"
+            if (player && (player.name.startsWith('Nouveau Pi') || player.name.startsWith('Nouveau Client') || player.name.startsWith('Nouveau PC')) && info.platform) {
+                updateData.name = `Client ${info.platform} (${deviceId})`;
+            }
+
+            await db('players').where({ id: deviceId }).update(updateData);
+            io.emit('admin-player-status', { deviceId, status: { health: updateData } });
+            console.log(`Player ${deviceId} info updated: IP=${info.ip} | RAM: ${info.freeMem}/${info.totalMem}MB | Disk: ${info.diskFree}/${info.diskTotal}GB | Temp: ${info.cpuTemp || 'N/A'}°C`);
+        } catch (err) {
+            console.error(`Error updating player info for ${deviceId}:`, err);
+        }
     });
 
     // Gérer la demande de la playlist suivante dans une séquence
@@ -2305,6 +2499,105 @@ io.on('connection', async (socket) => {
     });
 });
 
+
+// Fonction pour envoyer des notifications Webhook (Slack, Discord, Teams, Custom)
+async function sendWebhookNotification(webhookUrl, title, message, color = 0x3498db) {
+    if (!webhookUrl) return;
+    try {
+        let payload = {};
+        if (webhookUrl.includes('discord.com')) {
+            payload = {
+                embeds: [{
+                    title: title,
+                    description: message,
+                    color: color,
+                    timestamp: new Date().toISOString()
+                }]
+            };
+        } else if (webhookUrl.includes('slack.com')) {
+            payload = {
+                text: `*${title}*\n${message}`
+            };
+        } else if (webhookUrl.includes('office.com') || webhookUrl.includes('teams')) {
+            payload = {
+                "@type": "MessageCard",
+                "@context": "http://schema.org/extensions",
+                "summary": title,
+                "themeColor": color.toString(16),
+                "title": title,
+                "text": message
+            };
+        } else {
+            payload = { title, message, timestamp: new Date().toISOString() };
+        }
+
+        await axios.post(webhookUrl, payload, { timeout: 5000 });
+        console.log(`🔔 Notification Webhook envoyée à ${webhookUrl}`);
+    } catch (e) {
+        console.error(`⚠️ Erreur envoi Webhook vers ${webhookUrl}:`, e.message);
+    }
+}
+
+// Worker de surveillance de la santé des écrans et alertes de déconnexion
+const checkHealthAndNotifications = async () => {
+    try {
+        const settings = await db('settings').select('*');
+        const enableAlertsSetting = settings.find(s => s.key === 'enable_health_notifications');
+        const enableAlerts = enableAlertsSetting ? enableAlertsSetting.value === 'true' : false;
+        
+        if (!enableAlerts) return;
+
+        const webhookUrlSetting = settings.find(s => s.key === 'health_webhook_url');
+        const webhookUrl = webhookUrlSetting ? webhookUrlSetting.value : '';
+        if (!webhookUrl) return;
+
+        const offlineThresholdSetting = settings.find(s => s.key === 'health_offline_threshold_minutes');
+        const thresholdMinutes = offlineThresholdSetting ? (parseInt(offlineThresholdSetting.value) || 10) : 10;
+        const thresholdMs = thresholdMinutes * 60 * 1000;
+
+        const players = await db('players').where({ status: 'approved' });
+        const now = new Date();
+
+        for (const player of players) {
+            if (!player.lastSeen) continue;
+            const lastSeenDate = new Date(player.lastSeen);
+            const isOffline = (now - lastSeenDate) > thresholdMs;
+
+            const lastAlertDate = player.lastHealthAlertSent ? new Date(player.lastHealthAlertSent) : null;
+            const canSendAlert = !lastAlertDate || (now - lastAlertDate) > (15 * 60 * 1000);
+
+            if (isOffline && canSendAlert) {
+                const title = `🚨 Alerte Écran Hors-Ligne : ${player.name}`;
+                const message = `L'écran **${player.name}** (ID: \`${player.id}\`, IP: ${player.ip || 'Inconnue'}) ne répond plus depuis plus de ${thresholdMinutes} minutes (Dernière connexion: ${lastSeenDate.toLocaleString()}).`;
+                
+                await sendWebhookNotification(webhookUrl, title, message, 0xe74c3c);
+                await db('players').where({ id: player.id }).update({ lastHealthAlertSent: now.toISOString() });
+            }
+        }
+    } catch (e) {
+        console.error("Erreur worker checkHealthAndNotifications:", e.message);
+    }
+};
+
+setInterval(checkHealthAndNotifications, 2 * 60 * 1000);
+
+// Endpoint de test Webhook
+app.post('/api/admin/system/test-webhook', authMiddleware, checkRole(['admin']), async (req, res) => {
+    const { webhookUrl } = req.body;
+    if (!webhookUrl) return res.status(400).send('URL Webhook manquante');
+    
+    try {
+        await sendWebhookNotification(
+            webhookUrl, 
+            "🔔 Test de Notification OmniSign", 
+            "Ceci est un message de test envoyé depuis le serveur OmniSign. Les notifications de santé et de déconnexion sont correctement configurées !",
+            0x2ecc71
+        );
+        res.json({ success: true, message: 'Notification Webhook de test envoyée avec succès.' });
+    } catch (e) {
+        res.status(500).send('Erreur lors de l\'envoi du Webhook test : ' + e.message);
+    }
+});
 
 // Gestionnaire d'erreurs global pour capturer les erreurs Multer ou système
 app.use((err, req, res, next) => {

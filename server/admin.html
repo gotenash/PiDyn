@@ -47,6 +47,7 @@
         <button onclick="window.location.href='/'">📊 Accueil</button>
         <button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
+        <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
@@ -55,9 +56,23 @@
     </nav>
 
     <section id="analytics-section" style="display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2>Statistiques de Diffusion (Top 50)</h2>
-            <button class="danger" onclick="resetAnalytics()">Réinitialiser les stats</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+            <h2 style="margin: 0;">Statistiques de Diffusion (Top 50)</h2>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label style="font-size: 0.9em; font-weight: bold;">Groupe :</label>
+                    <select id="analytics-group-filter" onchange="onGroupFilterChange()" style="padding: 6px 10px;">
+                        <option value="">Tous les groupes</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label style="font-size: 0.9em; font-weight: bold;">Écran :</label>
+                    <select id="analytics-screen-filter" onchange="loadAnalytics()" style="padding: 6px 10px;">
+                        <option value="">Tous les écrans</option>
+                    </select>
+                </div>
+                <button class="danger" onclick="resetAnalytics()">Réinitialiser les stats</button>
+            </div>
         </div>
         <div class="stats-grid">
             <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/ecrans'">
@@ -225,7 +240,10 @@
             loadAnalytics();
         }
 
+        let allPlayersData = {};
+
         function updatePlayerCounts(players) {
+            allPlayersData = players || {};
             let onlineCount = 0;
             let offlineCount = 0;
             for (let id in players) {
@@ -240,6 +258,132 @@
             }
             document.getElementById('online-screens-count').innerText = onlineCount;
             document.getElementById('offline-screens-count').innerText = offlineCount;
+            populateAnalyticsFilters(players);
+        }
+
+        function populateAnalyticsFilters(players) {
+            const groupSelect = document.getElementById('analytics-group-filter');
+            const screenSelect = document.getElementById('analytics-screen-filter');
+            if (!groupSelect || !screenSelect) return;
+
+            const currentGroup = groupSelect.value;
+            const currentScreen = screenSelect.value;
+
+            // Extraire tous les groupes uniques
+            const groupsSet = new Set();
+            const screensList = [];
+
+            for (let id in players) {
+                const p = players[id];
+                if (!id || id === 'undefined' || id === 'null') continue;
+                if (p.group) groupsSet.add(p.group);
+                screensList.push({ id: id, name: p.name || id, group: p.group || '' });
+            }
+
+            // Générer le menu déroulant des groupes
+            let groupHtml = '<option value="">Tous les groupes</option>';
+            Array.from(groupsSet).sort().forEach(g => {
+                groupHtml += `<option value="${escapeHtml(g)}"${g === currentGroup ? ' selected' : ''}>${escapeHtml(g)}</option>`;
+            });
+            groupSelect.innerHTML = groupHtml;
+
+            // Remplir le menu des écrans
+            renderScreenOptions(screensList, groupSelect.value, currentScreen);
+        }
+
+        function renderScreenOptions(screensList, filterGroup, currentScreen) {
+            const screenSelect = document.getElementById('analytics-screen-filter');
+            if (!screenSelect) return;
+
+            let screenHtml = '<option value="">Tous les écrans</option>';
+            screensList.forEach(s => {
+                if (!filterGroup || s.group === filterGroup) {
+                    screenHtml += `<option value="${escapeHtml(s.id)}"${s.id === currentScreen ? ' selected' : ''}>${escapeHtml(s.name)} (${escapeHtml(s.id)})</option>`;
+                }
+            });
+            screenSelect.innerHTML = screenHtml;
+        }
+
+        function onGroupFilterChange() {
+            const selectedGroup = document.getElementById('analytics-group-filter').value;
+            const screensList = [];
+            for (let id in allPlayersData) {
+                const p = allPlayersData[id];
+                if (!id || id === 'undefined' || id === 'null') continue;
+                screensList.push({ id: id, name: p.name || id, group: p.group || '' });
+            }
+            renderScreenOptions(screensList, selectedGroup, '');
+            loadAnalytics();
+        }
+
+        function formatMediaName(url) {
+            if (!url) return { title: 'Média inconnu', fullUrl: '', type: 'Inconnu', icon: '❓' };
+
+            let decoded = url;
+            try {
+                decoded = decodeURIComponent(url);
+            } catch (e) {}
+
+            // Prise en charge explicite des pages composites (multi-zones)
+            if (decoded.startsWith('Page composite') || decoded.startsWith('Composite') || decoded.includes('zones:')) {
+                return {
+                    title: decoded,
+                    fullUrl: 'Layout Multi-Zones / Modèle de page',
+                    type: 'Page Composite',
+                    icon: '🧩'
+                };
+            }
+
+            let filename = decoded.split('/').pop().split('?')[0];
+
+            // Nettoyer les préfixes système générés lors des téléchargements
+            filename = filename.replace(/^(yt|img|pptx|zip|pdf|media|file)_\d+_/i, '');
+            filename = filename.replace(/^(yt|img|pptx|zip|pdf|media|file)_/i, '');
+
+            let type = 'Fichier';
+            let icon = '📁';
+
+            const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+
+            if (['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) {
+                type = 'Vidéo';
+                icon = '🎬';
+            } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) {
+                type = 'Image';
+                icon = '🖼️';
+            } else if (['mp3', 'wav', 'ogg', 'aac', 'm4a'].includes(ext)) {
+                type = 'Audio';
+                icon = '🎵';
+            } else if (['pdf'].includes(ext)) {
+                type = 'Document PDF';
+                icon = '📄';
+            } else if (['pptx', 'ppt'].includes(ext)) {
+                type = 'Présentation PowerPoint';
+                icon = '📊';
+            } else if (url.startsWith('http://') || url.startsWith('https://')) {
+                type = 'Site Web';
+                icon = '🌐';
+                try {
+                    const u = new URL(url);
+                    filename = u.hostname + (u.pathname !== '/' ? u.pathname : '');
+                } catch (e) {}
+            }
+
+            return {
+                title: filename || decoded,
+                fullUrl: url,
+                type: type,
+                icon: icon
+            };
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
         }
 
         async function loadPlayerCounts() {
@@ -252,24 +396,39 @@
         let analyticsChart = null;
         async function loadAnalytics() {
             const headers = { 'Authorization': `Bearer ${token}` };
+            const groupId = document.getElementById('analytics-group-filter') ? document.getElementById('analytics-group-filter').value : '';
+            const deviceId = document.getElementById('analytics-screen-filter') ? document.getElementById('analytics-screen-filter').value : '';
+
+            const params = new URLSearchParams();
+            if (groupId) params.append('groupId', groupId);
+            if (deviceId) params.append('deviceId', deviceId);
+            const queryString = params.toString() ? '?' + params.toString() : '';
             
             // Charger le tableau Top 50
-            const res = await fetch('/api/admin/analytics', { headers });
+            const res = await fetch(`/api/admin/analytics${queryString}`, { headers });
             const stats = await res.json();
-            let html = '<table><tr><th>Média / URL</th><th>Nombre de vues</th><th>Temps total affiché (hh:mm:ss)</th></tr>';
-            if (stats.length === 0) html += '<tr><td colspan="3">Aucune donnée disponible</td></tr>';
-            stats.forEach(s => {
-                const time = formatDuration(s.totalDuration);
-                html += `<tr>
-                    <td style="font-size: 0.9em; word-break: break-all;">${s.itemUrl}</td>
-                    <td>${s.count}</td>
-                    <td>${time}</td>
-                </tr>`;
-            });
+            let html = '<table><tr><th style="width:140px;">Type</th><th>Média / Élément</th><th style="width:130px;">Nombre de vues</th><th style="width:180px;">Temps total affiché</th></tr>';
+            if (!stats || stats.length === 0) {
+                html += '<tr><td colspan="4" style="text-align:center; padding:20px; color:#bdc3c7;">Aucune donnée disponible pour les filtres sélectionnés.</td></tr>';
+            } else {
+                stats.forEach(s => {
+                    const time = formatDuration(s.totalDuration);
+                    const media = formatMediaName(s.itemUrl);
+                    html += `<tr>
+                        <td><span style="background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; padding: 3px 8px; border-radius: 12px; font-size: 0.85em; white-space: nowrap; font-weight: bold;">${media.icon} ${media.type}</span></td>
+                        <td>
+                            <div style="font-weight: bold; font-size: 0.95em; color: var(--text-color, #ffffff);">${escapeHtml(media.title)}</div>
+                            <div style="font-size: 0.75em; opacity: 0.7; word-break: break-all; margin-top: 2px;">${escapeHtml(media.fullUrl)}</div>
+                        </td>
+                        <td style="font-weight: bold; font-size: 1.05em;">${s.count}</td>
+                        <td style="font-weight: bold; font-size: 1.05em;">${time}</td>
+                    </tr>`;
+                });
+            }
             document.getElementById('analytics-list').innerHTML = html + '</table>';
 
             // Charger les données du graphique horaire
-            const resHourly = await fetch('/api/admin/analytics/hourly', { headers });
+            const resHourly = await fetch(`/api/admin/analytics/hourly${queryString}`, { headers });
             const hourlyData = await resHourly.json();
             renderAnalyticsChart(hourlyData);
         }

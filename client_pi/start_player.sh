@@ -3,6 +3,33 @@ export GNOME_KEYRING_CONTROL=1
 export GNOME_KEYRING_PID=1
 export SECRET_VAULT_PASSWORD=none
 
+# Tuer swayidle ou tout processus de mise en veille automatique Wayland
+pkill -f swayidle 2>/dev/null
+
+# Désactiver la mise en veille X11 (DPMS, economiseur d'écran et écran noir)
+xset s off 2>/dev/null
+xset -dpms 2>/dev/null
+xset s noblank 2>/dev/null
+xset s 0 0 2>/dev/null
+
+# Désactiver la mise en veille sous Wayland (Raspberry Pi OS Bookworm)
+if command -v wlopm &> /dev/null; then
+    wlopm --on '*' 2>/dev/null
+fi
+
+# Boucle d'arrière-plan de maintien d'éveil (Anti-Sleep Watchdog)
+(
+    while true; do
+        sleep 45
+        xset s off 2>/dev/null
+        xset -dpms 2>/dev/null
+        xset s noblank 2>/dev/null
+        if command -v wlopm &> /dev/null; then
+            wlopm --on '*' 2>/dev/null
+        fi
+    done
+) &
+
 # Masquer le curseur de la souris (géré proprement via unclutter)
 unclutter -idle 0.5 -root &
 

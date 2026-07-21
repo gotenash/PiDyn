@@ -165,8 +165,23 @@ user-session=openbox
 EOF
 
 log_message "Configuration du démarrage automatique sur le bureau (Autologin)..."
-log_message "Désactivation de la mise en veille système (raspi-config)..."
+log_message "Désactivation de la mise en veille système (raspi-config & cmdline.txt)..."
 sudo raspi-config nonint do_blanking 0
+
+# Désactiver la mise en veille du noyau Linux (consoleblank=0 dans cmdline.txt)
+CMDLINE_FILE="$BOOT_DIR/cmdline.txt"
+if [ -f "$CMDLINE_FILE" ] && ! grep -q "consoleblank=0" "$CMDLINE_FILE"; then
+    sudo sed -i 's/$/ consoleblank=0/' "$CMDLINE_FILE"
+fi
+
+# Configurer Openbox pour interdire DPMS et l'écran noir au démarrage de session
+mkdir -p /home/pi/.config/openbox
+cat <<EOF > /home/pi/.config/openbox/autostart
+xset s off &
+xset -dpms &
+xset s noblank &
+EOF
+chown -R pi:pi /home/pi/.config/openbox
 
 sudo systemctl set-default graphical.target
 sudo raspi-config nonint do_boot_behaviour B4 || log_message "Avertissement : Impossible de configurer l'autologin via raspi-config."

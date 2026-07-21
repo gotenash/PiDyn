@@ -23,6 +23,7 @@
         <button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>
         <button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
+        <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
@@ -110,6 +111,29 @@
                 <label style="margin: 0; font-size: 14px;">Intervalle de capture (minutes) :</label>
                 <input type="number" id="set-periodic-screenshot-interval" style="width: 80px; margin: 0; padding: 4px;" min="1" max="1440" value="5">
             </div>
+
+            <!-- Supervision & Notifications Webhook (Health Check) -->
+            <div style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                <h3 style="margin-top: 0; color: #3498db; font-size: 1.1em;">🔔 Supervision & Notifications Automatiques (Health Check)</h3>
+                <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="set-health-notifications-enabled" style="width: auto; margin: 0;">
+                    <label for="set-health-notifications-enabled" style="cursor: pointer; font-weight: bold;">Activer les alertes automatiques de déconnexion & santé</label>
+                </div>
+
+                <div id="health-notifications-container" style="padding-left: 25px; display: flex; flex-direction: column; gap: 12px; transition: opacity 0.3s ease;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="margin: 0; font-size: 14px; min-width: 220px;">Délai d'inactivité (minutes) :</label>
+                        <input type="number" id="set-health-offline-threshold" style="width: 90px; margin: 0; padding: 4px;" min="1" max="1440" value="10">
+                        <span style="font-size: 0.85em; color: #bdc3c7;">(Déclenche l'alerte si un écran ne répond plus)</span>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <label style="margin: 0; font-size: 14px; min-width: 220px;">URL Webhook (Slack/Teams/Discord) :</label>
+                        <input type="text" id="set-health-webhook-url" placeholder="https://discord.com/api/webhooks/... ou https://hooks.slack.com/..." style="flex: 1; min-width: 280px; margin: 0; padding: 6px 10px;">
+                        <button type="button" onclick="testWebhook()" style="background: #27ae60; padding: 6px 12px; font-size: 0.9em; font-weight: bold;">🧪 Tester Webhook</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -190,6 +214,14 @@
                 
                 document.getElementById('notification-details').style.opacity = enabled ? '1' : '0.4';
                 document.getElementById('notification-details').style.pointerEvents = enabled ? 'auto' : 'none';
+
+                // Télémétrie & Santé Webhook
+                const healthEnabled = settings.enable_health_notifications === 'true';
+                document.getElementById('set-health-notifications-enabled').checked = healthEnabled;
+                document.getElementById('set-health-offline-threshold').value = settings.health_offline_threshold_minutes || '10';
+                document.getElementById('set-health-webhook-url').value = settings.health_webhook_url || '';
+                document.getElementById('health-notifications-container').style.opacity = healthEnabled ? '1' : '0.4';
+                document.getElementById('health-notifications-container').style.pointerEvents = healthEnabled ? 'auto' : 'none';
             }
             
             // Attach event listener once
@@ -206,6 +238,14 @@
                 document.getElementById('set-periodic-screenshot-enabled').addEventListener('change', (e) => {
                     document.getElementById('screenshot-interval-container').style.opacity = e.target.checked ? '1' : '0.4';
                     document.getElementById('screenshot-interval-container').style.pointerEvents = e.target.checked ? 'auto' : 'none';
+                });
+            }
+
+            if (!window.hasHealthListener) {
+                window.hasHealthListener = true;
+                document.getElementById('set-health-notifications-enabled').addEventListener('change', (e) => {
+                    document.getElementById('health-notifications-container').style.opacity = e.target.checked ? '1' : '0.4';
+                    document.getElementById('health-notifications-container').style.pointerEvents = e.target.checked ? 'auto' : 'none';
                 });
             }
 
@@ -241,6 +281,10 @@
             const notifyPlayerOnline = document.getElementById('set-notify-player-online').checked;
             const notifyTechAlert = document.getElementById('set-notify-tech-alert').checked;
             const offlineAlertDelay = document.getElementById('set-offline-alert-delay').value;
+
+            const enable_health_notifications = document.getElementById('set-health-notifications-enabled').checked;
+            const health_offline_threshold_minutes = document.getElementById('set-health-offline-threshold').value;
+            const health_webhook_url = document.getElementById('set-health-webhook-url').value;
             
             if (!confirm("Appliquer ?")) return;
             const res = await fetch('/api/admin/settings', {
@@ -248,7 +292,8 @@
                 body: JSON.stringify({ jwtSecret, apiKey, splashScreenUrl, screenWakeTime, screenSleepTime, disableClientLogs, disableDebugLogs, showOfflineAlert,
                                        periodicScreenshotEnabled, periodicScreenshotInterval,
                                        smtpHost, smtpPort, smtpUser, smtpPass, notificationEmail,
-                                       emailNotificationsEnabled, notifyPlaylistChange, notifyPlayerOffline, notifyPlayerOnline, notifyTechAlert, offlineAlertDelay })
+                                       emailNotificationsEnabled, notifyPlaylistChange, notifyPlayerOffline, notifyPlayerOnline, notifyTechAlert, offlineAlertDelay,
+                                       enable_health_notifications, health_offline_threshold_minutes, health_webhook_url })
             });
             if (res.ok) { 
                 alert('Enregistré !'); 
@@ -279,6 +324,23 @@
             });
             if (res.ok) alert("Mail de test envoyé avec succès !");
             else alert("Erreur lors de l'envoi : " + await res.text());
+        }
+
+        async function testWebhook() {
+            const webhookUrl = document.getElementById('set-health-webhook-url').value;
+            if (!webhookUrl) return alert("Veuillez saisir une URL Webhook.");
+
+            try {
+                const res = await fetch('/api/admin/system/test-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ webhookUrl })
+                });
+                if (res.ok) alert("🔔 Notification Webhook de test envoyée avec succès !");
+                else alert("Erreur envoi Webhook : " + await res.text());
+            } catch (e) {
+                alert("Erreur réseau : " + e.message);
+            }
         }
 
         async function downloadBackup() {

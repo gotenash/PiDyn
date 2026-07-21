@@ -171,6 +171,7 @@
         <button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>
         <button onclick="window.location.href='/ecrans'">🖥 Écrans</button>
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
+        <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
@@ -325,7 +326,7 @@
 
             let html = '';
             if (viewMode === 'table') {
-                html = '<table><tr><th>Nom</th><th>ID</th><th>Groupe</th><th>Statut</th><th>Diaporama</th><th>WiFi</th><th>Volume</th><th>Dernière vue</th><th>Action</th></tr>';
+                html = '<table><tr><th>Nom</th><th>ID</th><th>Groupe</th><th>Statut</th><th>Diaporama</th><th>Santé (RAM/Disque/Temp)</th><th>WiFi</th><th>Volume</th><th>Dernière vue</th><th>Action</th></tr>';
                 for (let id in players) {
                     const p = players[id];
                     if (!id || id === 'undefined' || id === 'null') continue;
@@ -333,6 +334,15 @@
                     const isOnline = p.lastSeen && (new Date() - new Date(p.lastSeen) < 60000);
                     const plName = p.currentPlaylistId ? (playlists[p.currentPlaylistId]?.name || 'Inconnue') : 'Aucune';
                     const lastSeen = p.lastSeen ? new Date(p.lastSeen).toLocaleString() : 'Jamais';
+
+                    let healthText = '<span style="color:#bdc3c7;">N/A</span>';
+                    if (p.freeMem && p.totalMem) {
+                        const ramUsedPct = Math.round(((p.totalMem - p.freeMem) / p.totalMem) * 100);
+                        const ramColor = ramUsedPct > 90 ? '#e74c3c' : (ramUsedPct > 75 ? '#e67e22' : '#2ecc71');
+                        const tempText = p.cpuTemp ? ` | <span style="color:${p.cpuTemp > 75 ? '#e74c3c' : '#2ecc71'};">🌡️${p.cpuTemp}°C</span>` : '';
+                        const diskText = p.diskFree !== undefined ? `<br><small style="color:${p.diskFree < 2 ? '#e74c3c' : '#bdc3c7'};">💾 ${p.diskFree}GB libres / ${p.diskTotal || '?'}GB</small>` : '';
+                        healthText = `<span style="color:${ramColor}; font-weight:bold;">RAM: ${p.freeMem}/${p.totalMem}MB</span>${tempText}${diskText}`;
+                    }
 
                     html += `<tr>
                         <td><span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>${p.name}</td>
@@ -362,6 +372,7 @@
                                     </optgroup>
                                 </select>` : ''}
                         </td>
+                        <td style="font-size:11px;">${healthText}</td>
                         <td>${p.wifiSSID || 'Ethernet'}<br><small>${p.ip || ''}</small></td>
                         <td>
                             <div style="display: flex; align-items: center; gap: 8px; min-width: 120px;">
@@ -400,6 +411,40 @@
                     
                     const screenSrc = p.latestScreenshot || '';
 
+                    let healthCardHtml = '';
+                    if (p.totalMem && p.freeMem) {
+                        const ramUsedPct = Math.round(((p.totalMem - p.freeMem) / p.totalMem) * 100);
+                        const ramColor = ramUsedPct > 90 ? '#e74c3c' : (ramUsedPct > 75 ? '#e67e22' : '#2ecc71');
+                        healthCardHtml += `
+                        <span class="label">RAM :</span>
+                        <span>
+                            <span style="font-size: 11px;">${p.freeMem}MB / ${p.totalMem}MB</span>
+                            <div style="background: rgba(255,255,255,0.1); height: 5px; border-radius: 3px; overflow: hidden; margin-top: 2px;">
+                                <div style="background: ${ramColor}; width: ${ramUsedPct}%; height: 100%;"></div>
+                            </div>
+                        </span>`;
+                    }
+
+                    if (p.diskTotal && p.diskFree !== undefined) {
+                        const diskUsedPct = Math.round(((p.diskTotal - p.diskFree) / p.diskTotal) * 100);
+                        const diskColor = p.diskFree < 2 ? '#e74c3c' : (diskUsedPct > 80 ? '#e67e22' : '#3498db');
+                        healthCardHtml += `
+                        <span class="label">Disque :</span>
+                        <span>
+                            <span style="font-size: 11px;">${p.diskFree}GB libres / ${p.diskTotal}GB</span>
+                            <div style="background: rgba(255,255,255,0.1); height: 5px; border-radius: 3px; overflow: hidden; margin-top: 2px;">
+                                <div style="background: ${diskColor}; width: ${diskUsedPct}%; height: 100%;"></div>
+                            </div>
+                        </span>`;
+                    }
+
+                    if (p.cpuTemp) {
+                        const tempColor = p.cpuTemp > 75 ? '#e74c3c' : (p.cpuTemp > 65 ? '#e67e22' : '#2ecc71');
+                        healthCardHtml += `
+                        <span class="label">Temp. CPU :</span>
+                        <span style="color: ${tempColor}; font-weight: bold;">🌡️ ${p.cpuTemp}°C</span>`;
+                    }
+
                     html += `
                     <div class="player-card" data-id="${id}" data-group-id="${p.groupId || ''}">
                         <div class="player-card-header">
@@ -434,6 +479,8 @@
                                 <span class="label">WiFi :</span>
                                 <span>${p.wifiSSID || 'Ethernet'} ${p.wifiSignal ? `(${p.wifiSignal}%)` : ''}</span>
                                 
+                                ${healthCardHtml}
+
                                 <span class="label">Dernière vue :</span>
                                 <span>${lastSeen}</span>
                                 
@@ -540,7 +587,13 @@
         }
         async function forceSync(id) { await fetch(`/api/admin/players/force-sync/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); }
         async function restartScreen(id) { await fetch(`/api/admin/players/restart-screen/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); }
-        async function rebootDevice(id) { if (confirm("Redémarrer physiquement le Raspberry Pi ?")) { await fetch(`/api/admin/players/reboot/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); } }
+        async function rebootDevice(id) {
+            const player = (typeof allPlayers !== 'undefined' && allPlayers[id]) ? allPlayers[id] : null;
+            const clientName = player ? (player.name || id) : id;
+            if (confirm(`Redémarrer physiquement le client (${clientName}) ?`)) {
+                await fetch(`/api/admin/players/reboot/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+            }
+        }
         async function toggleScreen(id, action) { await fetch('/api/admin/players/screen', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ deviceId: id, action }) }); }
         async function clearCache(id) { await fetch(`/api/admin/players/clear-cache/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); }
         async function takeScreenshot(id) { await fetch(`/api/admin/players/screenshot/${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }); }
