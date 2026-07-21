@@ -4,9 +4,8 @@
     <title>OmniSign - Médiathèque</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #2c3e50; color: white; }
-        header { padding: 10px 20px; background: #1a252f; display: flex; justify-content: space-between; align-items: center; }
-        .container { flex: 1; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
+        .container { flex: 1; display: flex; flex-direction: column; padding: 0; }
         .filters { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
         .filters label { font-size: 14px; }
         .filters select, .filters input { padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #34495e; color: white; }
@@ -155,17 +154,18 @@
     <script src="/assets/theme.js"></script>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px 20px; background: #1a252f; border-bottom: 2px solid #3498db;">
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
         <h1 style="margin: 0; color: #3498db;">OmniSign - Médiathèque</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
-    <nav style="margin: 0 20px 20px 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+    <nav style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
         <button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>
         <button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
         <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
+        <button class="secondary" onclick="window.location.href='/meetings'">🏢 Réunions</button>
         <button onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
         <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>

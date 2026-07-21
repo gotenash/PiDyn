@@ -141,7 +141,8 @@
 
         /* Templates Styles */
         .tpl-container { 
-            width: 100%; height: 100%; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; z-index: 5; 
+            width: 100%; height: 100%; color: white; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 9vh; font-family: sans-serif; z-index: 5; 
+            box-sizing: border-box;
             will-change: transform;
             transform: translate3d(0,0,0);
         }
@@ -771,36 +772,150 @@
                 if (page.template === 'canteen') {
                     const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
                     const today = dayNames[new Date().getDay()];
+                    const isLive = page.data && page.data.useLiveMenu !== false;
+                    const dId = (playlistData && playlistData.deviceId) ? playlistData.deviceId : '';
+                    const sId = (playlistData && playlistData.siteId) ? playlistData.siteId : '';
+
+                    const renderCanteen = (weekData) => {
+                        const menu = (weekData && weekData[today]) ? weekData[today] : { starter: 'Non renseignée', main: 'Non renseigné', dessert: 'Non renseigné' };
+                        tpl.innerHTML = `
+                            <div class="tpl-header">${page.data.title || 'MENU DU JOUR'} (${today})</div>
+                            <div class="tpl-content">
+                                <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${menu.starter || 'Non renseignée'}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${menu.main || 'Non renseigné'}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${menu.dessert || 'Non renseigné'}</div></div>
+                            </div>`;
+                    };
                     
-                    if (page.data.useLiveMenu) {
+                    if (isLive) {
                         tpl.innerHTML = `<div class="tpl-header">Chargement du menu...</div>`;
-                        fetch(`${targetServerUrl}/api/player/canteen/current`)
-                            .then(r => r.json())
+                        fetch(`${targetServerUrl}/api/player/canteen/current?deviceId=${encodeURIComponent(dId)}&siteId=${encodeURIComponent(sId)}`)
+                            .then(r => {
+                                if (!r.ok) throw new Error("HTTP " + r.status);
+                                return r.json();
+                            })
                             .then(weekData => {
-                                const menu = weekData[today] || { starter: '...', main: '...', dessert: '...' };
-                                tpl.innerHTML = `
-                                    <div class="tpl-header">${page.data.title || 'MENU DU JOUR'} (${today})</div>
-                                    <div class="tpl-content">
-                                        <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${menu.starter}</div></div>
-                                        <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${menu.main}</div></div>
-                                        <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${menu.dessert}</div></div>
-                                    </div>`;
-                            }).catch(() => { tpl.innerHTML = '<div class="tpl-header">Menu indisponible</div>'; });
+                                if (weekData && Object.keys(weekData).length > 0) {
+                                    try { localStorage.setItem('cached_canteen_menu', JSON.stringify(weekData)); } catch(e){}
+                                }
+                                renderCanteen(weekData);
+                            })
+                            .catch(async () => {
+                                try {
+                                    const rLocal = await fetch('canteen.json?nocache=' + Date.now());
+                                    if (rLocal.ok) {
+                                        const localWeekData = await rLocal.json();
+                                        if (localWeekData && Object.keys(localWeekData).length > 0) return renderCanteen(localWeekData);
+                                    }
+                                } catch(e) {}
+                                try {
+                                    const cachedStr = localStorage.getItem('cached_canteen_menu');
+                                    if (cachedStr) return renderCanteen(JSON.parse(cachedStr));
+                                } catch(e) {}
+                                renderCanteen({});
+                            });
                     } else {
                         tpl.innerHTML = `
-                            <div class="tpl-header">${page.data.title || 'MENU'}</div>
+                            <div class="tpl-header">${page.data.title || 'MENU CANTINE'}</div>
                             <div class="tpl-content">
-                                <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${page.data.starter}</div></div>
-                                <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${page.data.main}</div></div>
-                                <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${page.data.dessert}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">ENTRÉE</div><div class="tpl-value">${page.data.starter || 'Non renseignée'}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">PLAT</div><div class="tpl-value">${page.data.main || 'Non renseigné'}</div></div>
+                                <div class="tpl-row"><div class="tpl-label">DESSERT</div><div class="tpl-value">${page.data.dessert || 'Non renseigné'}</div></div>
                             </div>`;
                     }
                 } else if (page.template === 'meeting') {
-                    const statusClass = (page.data.status || '').toLowerCase();
-                    tpl.innerHTML = `
-                        <div class="tpl-meeting-room">${page.data.room}</div>
-                        <div style="font-size: 3vw; opacity: 0.8;">${page.data.subject || ''}</div>
-                        <div class="tpl-meeting-status status-${statusClass}">${page.data.status}</div>`;
+                    const isLive = page.data && page.data.useLiveMeeting !== false;
+                    const dId = (playlistData && playlistData.deviceId) ? playlistData.deviceId : '';
+                    const sId = (playlistData && playlistData.siteId) ? playlistData.siteId : '';
+
+                    const renderMeetings = (data) => {
+                        const allMeetings = (data && data.meetings) ? data.meetings : [];
+                        const now = new Date();
+
+                        // Filtrer les réunions dont l'heure de fin est dépassée
+                        const activeMeetings = allMeetings.filter(m => {
+                            if (!m.endTime) return true;
+                            let endIso = m.endTime;
+                            if (!endIso.includes('T')) {
+                                const todayStr = now.toISOString().split('T')[0];
+                                endIso = `${todayStr}T${m.endTime}`;
+                            }
+                            const endDate = new Date(endIso);
+                            return isNaN(endDate.getTime()) || endDate > now;
+                        });
+
+                        if (activeMeetings.length === 0) {
+                            tpl.innerHTML = `
+                                <div class="tpl-meeting-room">${page.data.room || 'SALLE DE RÉUNION'}</div>
+                                <div style="font-size: 2.5vw; color: #2ecc71; margin-top: 15px;">🟢 Aucune réunion à venir</div>`;
+                        } else {
+                            const firstM = activeMeetings[0];
+                            const room = (data.rooms || []).find(r => r.id === firstM.roomId) || { name: page.data.room || 'Salle' };
+                            
+                            let startIso = firstM.startTime;
+                            let endIso = firstM.endTime;
+                            if (startIso && !startIso.includes('T')) {
+                                const todayStr = now.toISOString().split('T')[0];
+                                startIso = `${todayStr}T${startIso}`;
+                            }
+                            if (endIso && !endIso.includes('T')) {
+                                const todayStr = now.toISOString().split('T')[0];
+                                endIso = `${todayStr}T${endIso}`;
+                            }
+
+                            const startDate = new Date(startIso);
+                            const endDate = new Date(endIso);
+                            const isInProgress = (now >= startDate && now < endDate);
+
+                            const startDisplay = firstM.startTime ? (firstM.startTime.includes('T') ? firstM.startTime.substring(11, 16) : firstM.startTime) : '';
+                            const endDisplay = firstM.endTime ? (firstM.endTime.includes('T') ? firstM.endTime.substring(11, 16) : firstM.endTime) : '';
+
+                            const statusHtml = isInProgress
+                                ? `<div class="tpl-meeting-status status-occupied" style="background:#e74c3c; color:white;">🔴 EN COURS</div>`
+                                : `<div class="tpl-meeting-status status-disponible" style="background:#3498db; color:white;">🔵 PROCHAINE RÉUNION</div>`;
+
+                            tpl.innerHTML = `
+                                <div class="tpl-meeting-room">📍 ${room.name}</div>
+                                <div style="font-size: 3vw; font-weight: bold; margin: 15px 0;">${firstM.title || 'Réunion'}</div>
+                                <div style="font-size: 2vw; color: #3498db; margin-bottom: 15px;">⏰ ${startDisplay} - ${endDisplay} ${firstM.organizer ? '• ' + firstM.organizer : ''}</div>
+                                ${statusHtml}`;
+                        }
+                    };
+
+                    if (isLive) {
+                        tpl.innerHTML = `<div class="tpl-header">Chargement des réunions...</div>`;
+                        fetch(`${targetServerUrl}/api/player/meetings/today?deviceId=${encodeURIComponent(dId)}&siteId=${encodeURIComponent(sId)}`)
+                            .then(r => {
+                                if (!r.ok) throw new Error("HTTP " + r.status);
+                                return r.json();
+                            })
+                            .then(data => {
+                                if (data && data.meetings) {
+                                    try { localStorage.setItem('cached_meetings_data', JSON.stringify(data)); } catch(e){}
+                                }
+                                renderMeetings(data);
+                            })
+                            .catch(async () => {
+                                try {
+                                    const rLocal = await fetch('meetings.json?nocache=' + Date.now());
+                                    if (rLocal.ok) {
+                                        const localData = await rLocal.json();
+                                        if (localData && localData.meetings) return renderMeetings(localData);
+                                    }
+                                } catch(e) {}
+                                try {
+                                    const cachedStr = localStorage.getItem('cached_meetings_data');
+                                    if (cachedStr) return renderMeetings(JSON.parse(cachedStr));
+                                } catch(e) {}
+                                renderMeetings({ rooms: [], meetings: [] });
+                            });
+                    } else {
+                        const statusClass = (page.data.status || 'disponible').toLowerCase();
+                        tpl.innerHTML = `
+                            <div class="tpl-meeting-room">${page.data.room || 'Salle de Réunion'}</div>
+                            <div style="font-size: 3vw; opacity: 0.8;">${page.data.subject || 'Objet non renseigné'}</div>
+                            <div class="tpl-meeting-status status-${statusClass}">${page.data.status || 'Disponible'}</div>`;
+                    }
                 }
                 else if (page.template === 'video_fullscreen') {
                     const videoUrl = page.data.localVideoUrl || page.data.videoUrl;

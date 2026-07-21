@@ -1,9 +1,0 @@
-@echo off
-title Build PiDyn Executable
-echo Installation de pkg en global...
-call npm install -g pkg
-echo Installation des dependances locales...
-call npm install
-echo Creation de l'executable dans le dossier /dist...
-call npm run build
-pause

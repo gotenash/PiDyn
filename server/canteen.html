@@ -6,11 +6,14 @@
         body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
         section { background: #1a252f; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
         .day-box { background: #34495e; padding: 15px; border-radius: 8px; margin-bottom: 10px; display: grid; grid-template-columns: 100px 1fr 1fr 1fr; gap: 10px; align-items: center; }
-        input { padding: 8px; border-radius: 4px; border: 1px solid #1a252f; background: #2c3e50; color: white; width: 100%; box-sizing: border-box; }
-        button { padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        button.secondary { background: #6c757d; }
+        input, select { padding: 8px; border-radius: 4px; border: 1px solid #1a252f; background: #2c3e50; color: white; width: 100%; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button.secondary { background: #6c757d; font-weight: normal; }
         h1, h2 { color: #3498db; }
         label { font-size: 12px; color: #bdc3c7; }
+        .week-nav-btn { background: #34495e; padding: 8px 12px; font-size: 13px; margin: 0 2px; }
+        .week-nav-btn:hover { background: #4e6d8c; }
+        .site-badge { background: #9b59b6; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block; }
     </style>
     <link rel="stylesheet" href="/assets/theme.css">
     <script src="/assets/theme.js"></script>
@@ -26,12 +29,31 @@
     </nav>
 
     <section>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <div>
-                <label>Semaine de l'année</label><br>
-                <input type="week" id="week-selector" onchange="loadMenu()">
+        <!-- Barre de filtres : Sélection du site & Navigation par semaine -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; background: #2c3e50; padding: 15px; border-radius: 6px;">
+            <!-- Sélection du Site (Admin ou fixe selon le rôle) -->
+            <div id="site-container" style="display: flex; align-items: center; gap: 10px;">
+                <label style="font-size: 14px; font-weight: bold; color: #ecf0f1;">🏢 Site :</label>
+                <div id="site-control">
+                    <!-- Rempli dynamiquement -->
+                </div>
             </div>
-            <button onclick="saveMenu()" style="background: #27ae60;">💾 Enregistrer le menu</button>
+
+            <!-- Navigation entre semaines -->
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="week-nav-btn" onclick="changeWeek(-1)" title="Semaine précédente">⬅️ Précédente</button>
+                <input type="week" id="week-selector" onchange="loadMenu()" style="width: 170px; font-weight: bold;">
+                <button type="button" class="week-nav-btn" onclick="setCurrentWeek()" title="Semaine courante">📅 Aujourd'hui</button>
+                <button type="button" class="week-nav-btn" onclick="changeWeek(1)" title="Semaine suivante">Suivante ➡️</button>
+            </div>
+
+            <button onclick="saveMenu()" style="background: #27ae60; font-size: 14px;">💾 Enregistrer le menu</button>
+        </div>
+
+        <!-- Informations sur la semaine sélectionnée -->
+        <div style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; color: #bdc3c7; font-size: 13px;">
+            <span id="week-dates-label" style="font-weight: bold; color: #3498db;"></span>
+            <span id="menu-status-badge" style="font-size: 12px;"></span>
         </div>
 
         <div id="days-container">
@@ -42,13 +64,15 @@
     <script>
         const token = localStorage.getItem('pidyn_token');
         const role = localStorage.getItem('pidyn_role');
+        const userSiteId = localStorage.getItem('pidyn_siteId');
         if (!token) window.location.href = '/';
 
         const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
         const fields = ['starter', 'main', 'dessert'];
+        let sitesList = [];
 
-        function init() {
-            // Navigation dynamique
+        async function init() {
+            // Navigation principale
             const nav = document.getElementById('main-nav');
             let html = `<button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>`;
             if (role !== 'cook') {
@@ -57,6 +81,7 @@
                 html += `<button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>`;
             }
             html += `<button onclick="window.location.href='/canteen'">🍴 Cantine</button>`;
+            html += `<button class="secondary" onclick="window.location.href='/meetings'">🏢 Réunions</button>`;
             if (role !== 'cook') {
                 html += `<button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>`;
             }
@@ -67,7 +92,56 @@
             }
             nav.innerHTML = html;
 
-            // Sélecteur de semaine par défaut (courante)
+            // Récupérer la liste des sites pour le sélecteur
+            await loadSites();
+
+            // Génération du sélecteur de site
+            const siteControl = document.getElementById('site-control');
+            if (role === 'admin') {
+                let sHtml = `<select id="site-selector" onchange="loadMenu()" style="width: 220px; font-weight: bold;">`;
+                sitesList.forEach(s => {
+                    const selected = s.id === userSiteId ? 'selected' : '';
+                    sHtml += `<option value="${s.id}" ${selected}>${s.name}</option>`;
+                });
+                sHtml += `</select>`;
+                siteControl.innerHTML = sHtml;
+            } else {
+                const currentSite = sitesList.find(s => s.id === userSiteId) || { name: userSiteId || 'Site par défaut' };
+                siteControl.innerHTML = `<span class="site-badge">${currentSite.name}</span><input type="hidden" id="site-selector" value="${userSiteId || ''}">`;
+            }
+
+            // Générer la structure des jours
+            const container = document.getElementById('days-container');
+            days.forEach(day => {
+                const div = document.createElement('div');
+                div.className = 'day-box';
+                div.innerHTML = `<strong>${day}</strong>
+                    <div><label>Entrée</label><input type="text" data-day="${day}" data-field="starter" placeholder="Ex: Salade composée"></div>
+                    <div><label>Plat</label><input type="text" data-day="${day}" data-field="main" placeholder="Ex: Poulet rôti et frites"></div>
+                    <div><label>Dessert</label><input type="text" data-day="${day}" data-field="dessert" placeholder="Ex: Tarte aux pommes"></div>`;
+                container.appendChild(div);
+            });
+
+            // Initialiser la semaine courante
+            setCurrentWeek();
+        }
+
+        async function loadSites() {
+            try {
+                const res = await fetch('/api/admin/sites', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (res.ok) {
+                    sitesList = await res.json();
+                } else {
+                    const resData = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+                    const data = await resData.json();
+                    sitesList = data.sites || [];
+                }
+            } catch (e) {
+                sitesList = [{ id: 'site_paris', name: 'Campus Paris' }, { id: 'site_lyon', name: 'Campus Lyon' }];
+            }
+        }
+
+        function setCurrentWeek() {
             const now = new Date();
             const dayNum = now.getUTCDay() || 7;
             now.setUTCDate(now.getUTCDate() + 4 - dayNum);
@@ -75,35 +149,95 @@
             const onejan = new Date(Date.UTC(year,0,1));
             const week = Math.ceil((((now - onejan) / 86400000) + 1) / 7);
             document.getElementById('week-selector').value = `${year}-W${week.toString().padStart(2,'0')}`;
-
-            // Créer les champs
-            const container = document.getElementById('days-container');
-            days.forEach(day => {
-                const div = document.createElement('div');
-                div.className = 'day-box';
-                div.innerHTML = `<strong>${day}</strong>
-                    <div><label>Entrée</label><input type="text" data-day="${day}" data-field="starter"></div>
-                    <div><label>Plat</label><input type="text" data-day="${day}" data-field="main"></div>
-                    <div><label>Dessert</label><input type="text" data-day="${day}" data-field="dessert"></div>`;
-                container.appendChild(div);
-            });
             loadMenu();
         }
 
+        function changeWeek(offset) {
+            const val = document.getElementById('week-selector').value;
+            if (!val) return setCurrentWeek();
+
+            const [yearStr, weekStr] = val.split('-W');
+            let year = parseInt(yearStr, 10);
+            let week = parseInt(weekStr, 10) + offset;
+
+            if (week < 1) {
+                year--;
+                week = 52;
+            } else if (week > 52) {
+                year++;
+                week = 1;
+            }
+
+            document.getElementById('week-selector').value = `${year}-W${week.toString().padStart(2,'0')}`;
+            loadMenu();
+        }
+
+        function getSelectedSiteId() {
+            const sel = document.getElementById('site-selector');
+            return sel ? sel.value : (userSiteId || '');
+        }
+
+        function updateWeekDatesLabel(weekValue) {
+            if (!weekValue) return;
+            const [yearStr, weekStr] = weekValue.split('-W');
+            const year = parseInt(yearStr, 10);
+            const week = parseInt(weekStr, 10);
+
+            // Calcul du lundi de la semaine ISO
+            const simple = new Date(year, 0, 1 + (week - 1) * 7);
+            const dow = simple.getDay();
+            const ISOmonday = simple;
+            if (dow <= 4) ISOmonday.setDate(simple.getDate() - simple.getDay() + 1);
+            else ISOmonday.setDate(simple.getDate() + 8 - simple.getDay());
+
+            const friday = new Date(ISOmonday);
+            friday.setDate(ISOmonday.getDate() + 4);
+
+            const options = { day: 'numeric', month: 'long', year: 'numeric' };
+            document.getElementById('week-dates-label').innerText = `Semaine ${week} (${year}) : Du ${ISOmonday.toLocaleDateString('fr-FR', options)} au ${friday.toLocaleDateString('fr-FR', options)}`;
+        }
+
         async function loadMenu() {
-            const weekId = document.getElementById('week-selector').value.replace('-W', '-');
-            const res = await fetch(`/api/admin/canteen/${weekId}`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const data = await res.json();
-            
+            const weekValue = document.getElementById('week-selector').value;
+            if (!weekValue) return;
+
+            updateWeekDatesLabel(weekValue);
+            const weekId = weekValue.replace('-W', '-');
+            const siteId = getSelectedSiteId();
+
+            const res = await fetch(`/api/admin/canteen/${weekId}?siteId=${encodeURIComponent(siteId)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            const responseData = await res.json();
+            const data = responseData.data || {};
+
+            let hasEntries = false;
             document.querySelectorAll('input[data-day]').forEach(input => {
                 const d = input.dataset.day;
                 const f = input.dataset.field;
-                input.value = (data && data[d]) ? data[d][f] : '';
+                const val = (data && data[d]) ? (data[d][f] || '') : '';
+                input.value = val;
+                if (val.trim() !== '') hasEntries = true;
             });
+
+            const badge = document.getElementById('menu-status-badge');
+            if (hasEntries) {
+                badge.innerText = '🟢 Menu renseigné pour cette semaine';
+                badge.style.color = '#2ecc71';
+            } else {
+                badge.innerText = '⚪ Aucun menu enregistré pour cette semaine';
+                badge.style.color = '#bdc3c7';
+            }
         }
 
         async function saveMenu() {
-            const weekId = document.getElementById('week-selector').value.replace('-W', '-');
+            const weekValue = document.getElementById('week-selector').value;
+            if (!weekValue) return alert('Veuillez sélectionner une semaine.');
+
+            const weekId = weekValue.replace('-W', '-');
+            const siteId = getSelectedSiteId();
+
             const menuData = {};
             days.forEach(day => {
                 menuData[day] = {};
@@ -115,9 +249,17 @@
             const res = await fetch('/api/admin/canteen', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ weekId, data: menuData })
+                body: JSON.stringify({ weekId, siteId, data: menuData })
             });
-            if (res.ok) alert('Menu enregistré avec succès !');
+
+            if (res.ok) {
+                const siteName = sitesList.find(s => s.id === siteId)?.name || siteId;
+                alert(`Menu enregistré avec succès pour la semaine ${weekValue} (${siteName}) !`);
+                loadMenu();
+            } else {
+                const errText = await res.text();
+                alert('Erreur lors de l\'enregistrement : ' + errText);
+            }
         }
 
         function logout() {
@@ -127,8 +269,10 @@
             localStorage.removeItem('pidyn_siteId');
             window.location.href = '/';
         }
+
         init();
     </script>
+
     <footer style="text-align: center; margin-top: 40px; padding: 20px; font-size: 12px; color: #7f8c8d; border-top: 1px solid #34495e;">
         OmniSign est sous <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: #3498db; text-decoration: none;">licence MIT</a> - Auteur : <a href="https://github.com/gotenash" target="_blank" style="color: #3498db; text-decoration: none;">gotenash</a>
     </footer>

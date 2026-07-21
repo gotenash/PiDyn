@@ -25,6 +25,7 @@
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
         <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
+        <button class="secondary" onclick="window.location.href='/meetings'">🏢 Réunions</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
         <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
@@ -159,6 +160,19 @@
         </div>
     </section>
 
+    <section>
+        <h2>Jeu de Données de Démonstration (5 Collèges)</h2>
+        <p style="margin-top: 0; color: #bdc3c7; font-size: 14px;">
+            Génère automatiquement un jeu de données conséquent comprenant <b>5 collèges</b> fictifs (Saint-Exupéry, Marie Curie, Jules Verne, Jean Moulin, Paul Éluard), avec leurs utilisateurs (emails en <code>@kikoo.ovh</code> et rôles cuisinier, secrétaire, auteur), leurs salles de réunion, leurs réunions planifiées et leurs menus de cantine complets.
+            <br><i>Note : La suppression efface exclusivement ce jeu de données de démo et conserve toutes vos données de test intactes.</i>
+        </p>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <button onclick="generateDemoData()" style="background: #9b59b6; font-weight: bold;">🎲 Générer le jeu de données démo (5 Collèges)</button>
+            <button onclick="clearDemoData()" id="btn-clear-demo" class="danger" style="display: none; font-weight: bold;">🗑️ Supprimer le jeu de données démo</button>
+            <span id="demo-data-status" style="font-weight: bold; margin-left: 10px;">Statut : Recherche...</span>
+        </div>
+    </section>
+
     <script>
         let token = localStorage.getItem('pidyn_token');
         let role = localStorage.getItem('pidyn_role');
@@ -250,6 +264,7 @@
             }
 
             loadCookiesStatus();
+            loadDemoDataStatus();
         }
 
         function generateJWTSecret() {
@@ -405,6 +420,65 @@
             if (res.ok) {
                 alert("Fichier cookies.txt supprimé.");
                 loadCookiesStatus();
+            }
+        }
+
+        async function loadDemoDataStatus() {
+            try {
+                const res = await fetch('/api/admin/system/demo-data/status', { headers: { 'Authorization': `Bearer ${token}` } });
+                const { exists, sitesCount, usersCount } = await res.json();
+                const statusSpan = document.getElementById('demo-data-status');
+                const clearBtn = document.getElementById('btn-clear-demo');
+                if (exists) {
+                    statusSpan.innerText = `Statut : Jeu de données démo présent (${sitesCount} collèges, ${usersCount} utilisateurs @kikoo.ovh)`;
+                    statusSpan.style.color = "#2ecc71";
+                    clearBtn.style.display = "inline-block";
+                } else {
+                    statusSpan.innerText = "Statut : Aucun jeu de données démo présent";
+                    statusSpan.style.color = "#bdc3c7";
+                    clearBtn.style.display = "none";
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function generateDemoData() {
+            if (!confirm("Générer le jeu de données démo complet (5 collèges, réunions, cantine, utilisateurs @kikoo.ovh) ?")) return;
+            document.getElementById('demo-data-status').innerText = "Génération en cours...";
+            document.getElementById('demo-data-status').style.color = "#f39c12";
+
+            const res = await fetch('/api/admin/system/demo-data/generate', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                alert(data.message);
+                loadDemoDataStatus();
+            } else {
+                alert("Erreur lors de la génération : " + await res.text());
+                loadDemoDataStatus();
+            }
+        }
+
+        async function clearDemoData() {
+            if (!confirm("Supprimer uniquement le jeu de données de démonstration (les 5 collèges et leurs utilisateurs @kikoo.ovh) ? Vos données réelles de test resteront intactes.")) return;
+            document.getElementById('demo-data-status').innerText = "Suppression en cours...";
+
+            const res = await fetch('/api/admin/system/demo-data/clear', {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                alert(data.message);
+                loadDemoDataStatus();
+            } else {
+                alert("Erreur lors de la suppression : " + await res.text());
+                loadDemoDataStatus();
             }
         }
 

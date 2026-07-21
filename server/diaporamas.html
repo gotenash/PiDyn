@@ -68,6 +68,7 @@
         <button onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>
         <button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>
         <button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>
+        <button class="secondary" onclick="window.location.href='/meetings'">🏢 Réunions</button>
         <button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>
         <button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>
         <button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>
@@ -154,18 +155,32 @@
             if (item.template) {
                 let tplHtml = '';
                 if (item.template === 'canteen') {
-                    tplHtml = `
-                        <div style="color:#3498db; font-weight:bold; font-size:calc(24px * 0.12); border-bottom:1px solid #3498db; margin-bottom:5px; padding-bottom:2px; text-align:center;">${item.data.title || 'MENU'}</div>
-                        <div style="font-size:calc(16px * 0.12); line-height: 1.2; padding:0 5px;">
-                            <p style="margin:2px 0;"><b>Entrée:</b> ${item.data.starter || ''}</p>
-                            <p style="margin:2px 0;"><b>Plat:</b> ${item.data.main || ''}</p>
-                            <p style="margin:2px 0;"><b>Dessert:</b> ${item.data.dessert || ''}</p>
-                        </div>`;
+                    if (item.data.useLiveMenu) {
+                        tplHtml = `
+                            <div style="color:#3498db; font-weight:bold; font-size:calc(24px * 0.12); border-bottom:1px solid #3498db; margin-bottom:5px; padding-bottom:2px; text-align:center;">${item.data.title || 'MENU CANTINE'} (Live)</div>
+                            <div style="font-size:calc(14px * 0.12); line-height: 1.2; padding:0 5px; color:#2ecc71; text-align:center;">
+                                🟢 Menu en direct
+                            </div>`;
+                    } else {
+                        tplHtml = `
+                            <div style="color:#3498db; font-weight:bold; font-size:calc(24px * 0.12); border-bottom:1px solid #3498db; margin-bottom:5px; padding-bottom:2px; text-align:center;">${item.data.title || 'MENU CANTINE'}</div>
+                            <div style="font-size:calc(16px * 0.12); line-height: 1.2; padding:0 5px;">
+                                <p style="margin:2px 0;"><b>Entrée:</b> ${item.data.starter || 'Non renseignée'}</p>
+                                <p style="margin:2px 0;"><b>Plat:</b> ${item.data.main || 'Non renseigné'}</p>
+                                <p style="margin:2px 0;"><b>Dessert:</b> ${item.data.dessert || 'Non renseigné'}</p>
+                            </div>`;
+                    }
                 } else if (item.template === 'meeting') {
-                    tplHtml = `
-                        <div style="font-size:calc(28px * 0.12); font-weight:bold; margin-bottom:2px; text-align:center;">${item.data.room || ''}</div>
-                        <div style="color:#bdc3c7; font-size:calc(18px * 0.12); margin-bottom:5px; text-align:center;">${item.data.subject || ''}</div>
-                        <div style="display:inline-block; margin:0 auto; padding:2px 8px; border-radius:10px; font-size:calc(12px * 0.12); background:${item.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${item.data.status || ''}</div>`;
+                    if (item.data.useLiveMeeting) {
+                        tplHtml = `
+                            <div style="font-size:calc(26px * 0.12); font-weight:bold; margin-bottom:2px; text-align:center;">${item.data.room || 'Salles'}</div>
+                            <div style="color:#2ecc71; font-size:calc(14px * 0.12); margin-bottom:5px; text-align:center;">🟢 Live Agenda</div>`;
+                    } else {
+                        tplHtml = `
+                            <div style="font-size:calc(28px * 0.12); font-weight:bold; margin-bottom:2px; text-align:center;">${item.data.room || 'Salle'}</div>
+                            <div style="color:#bdc3c7; font-size:calc(18px * 0.12); margin-bottom:5px; text-align:center;">${item.data.subject || 'Réunion'}</div>
+                            <div style="display:inline-block; margin:0 auto; padding:2px 8px; border-radius:10px; font-size:calc(12px * 0.12); background:${(item.data.status || 'Disponible') === 'Disponible' ? '#27ae60' : '#e74c3c'}">${item.data.status || 'Disponible'}</div>`;
+                    }
                 } else if (item.template === 'video_fullscreen') {
                     const authenticatedVideoUrl = getAuthenticatedUrl(item.data.videoUrl);
                     tplHtml = item.data.videoUrl 

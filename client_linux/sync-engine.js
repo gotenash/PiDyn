@@ -341,10 +341,26 @@ async function syncPlaylist(playlistData) {
     playlistData.activeAlerts = activeAlerts;
 
     playlistData.serverOnline = true;
-    await fs.writeJson(LOCAL_MANIFEST, playlistData);
+    await fs.writeJson(LOCAL_MANIFEST, playlistData, { spaces: 2 });
     await fs.chmod(LOCAL_MANIFEST, 0o644);
+
+    // Synchronisation hors-ligne des menus de cantine et des réunions
+    try {
+        const canteenRes = await axios.get(resolveMediaUrl(`/api/player/canteen/current?deviceId=${DEVICE_ID}`), { timeout: 5000 });
+        if (canteenRes.data && Object.keys(canteenRes.data).length > 0) {
+            await fs.writeJson(path.join(APP_DIR, 'canteen.json'), canteenRes.data, { spaces: 2 });
+        }
+    } catch (e) {}
+
+    try {
+        const meetingsRes = await axios.get(resolveMediaUrl(`/api/player/meetings/today?deviceId=${DEVICE_ID}`), { timeout: 5000 });
+        if (meetingsRes.data && meetingsRes.data.meetings) {
+            await fs.writeJson(path.join(APP_DIR, 'meetings.json'), meetingsRes.data, { spaces: 2 });
+        }
+    } catch (e) {}
+
     socket.emit('player-status-update', { downloading: false });
-    console.log('✅ Playlist locale à jour.');
+    console.log('✅ Playlist et données locales à jour.');
 }
 
 async function setServerStatus(isOnline) {

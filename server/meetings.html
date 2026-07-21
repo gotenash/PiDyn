@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OmniSign - Salles & Réunions</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
+        section { background: #1a252f; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        input, select, textarea { padding: 8px; border-radius: 4px; border: 1px solid #34495e; background: #2c3e50; color: white; width: 100%; box-sizing: border-box; }
+        button { padding: 10px 18px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button.secondary { background: #6c757d; font-weight: normal; }
+        button.danger { background: #e74c3c; }
+        button.success { background: #2ecc71; }
+        label { font-size: 12px; color: #bdc3c7; margin-bottom: 4px; display: block; }
+        
+        .tab-btn { background: #34495e; padding: 10px 16px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+        .tab-btn.active { background: #3498db; border-color: #3498db; font-weight: bold; }
+        
+        /* Grille Agenda */
+        .agenda-grid-container { display: flex; flex-direction: column; overflow-x: auto; background: #2c3e50; border-radius: 8px; border: 1px solid #34495e; }
+        .agenda-header { display: flex; border-bottom: 2px solid #34495e; background: #1a252f; position: sticky; top: 0; z-index: 10; }
+        .agenda-time-col-header { width: 70px; min-width: 70px; padding: 10px; font-weight: bold; text-align: center; border-right: 1px solid #34495e; font-size: 13px; color: #7f8c8d; }
+        .agenda-room-col-header { flex: 1; min-width: 180px; padding: 12px; font-weight: bold; text-align: center; border-right: 1px solid #34495e; }
+        
+        .agenda-body { display: flex; position: relative; }
+        .agenda-time-col { width: 70px; min-width: 70px; border-right: 1px solid #34495e; background: #1a252f; }
+        .agenda-time-slot { height: 50px; border-bottom: 1px solid #243342; font-size: 11px; color: #bdc3c7; text-align: center; line-height: 50px; box-sizing: border-box; }
+        
+        .agenda-room-col { flex: 1; min-width: 180px; border-right: 1px solid #34495e; position: relative; background: #2c3e50; }
+        .agenda-room-slot { height: 50px; border-bottom: 1px solid rgba(255,255,255,0.05); box-sizing: border-box; cursor: pointer; }
+        .agenda-room-slot:hover { background: rgba(52, 152, 219, 0.15); }
+        
+        .meeting-card { position: absolute; left: 4px; right: 4px; border-radius: 6px; padding: 6px 8px; color: white; font-size: 12px; overflow: hidden; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 5; transition: transform 0.1s; border-left: 4px solid rgba(255,255,255,0.6); }
+        .meeting-card:hover { transform: scale(1.02); z-index: 8; }
+        .meeting-title { font-weight: bold; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .meeting-time { font-size: 10px; opacity: 0.9; }
+
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-content { background: #1a252f; width: 480px; max-width: 90%; padding: 24px; border-radius: 8px; border: 1px solid #34495e; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+        /* Guidance Visiteurs */
+        .visitor-card { background: #2c3e50; border-radius: 8px; padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 6px solid #3498db; }
+        .visitor-status { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .status-now { background: #2ecc71; color: #145a32; }
+        .status-next { background: #f39c12; color: #5b3d00; }
+        .status-past { background: #7f8c8d; color: white; opacity: 0.6; }
+    </style>
+    <link rel="stylesheet" href="/assets/theme.css">
+    <script src="/assets/theme.js"></script>
+</head>
+<body>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
+            <h1 style="margin: 0; color: #3498db;">OmniSign - Salles & Réunions</h1>
+            <button class="secondary" onclick="logout()">Déconnexion</button>
+        </header>
+
+        <nav id="main-nav" style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+            <!-- Généré selon rôle -->
+        </nav>
+
+        <section>
+            <!-- Filtres et Modes de Vue -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; background: #2c3e50; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                    <div>
+                        <label>Date :</label>
+                        <input type="date" id="date-picker" onchange="loadData()" style="width: 160px; font-weight: bold;">
+                    </div>
+                    <div id="site-selector-container">
+                        <label>Site :</label>
+                        <div id="site-control"></div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="tab-btn active" id="btn-view-agenda" onclick="switchView('agenda')">🗓️ Agenda Visuel</button>
+                    <button class="tab-btn" id="btn-view-list" onclick="switchView('list')">📋 Guidance Visiteurs</button>
+                    <button class="tab-btn" id="btn-view-rooms" onclick="switchView('rooms')">🏢 Gestion Salles</button>
+                    <button class="tab-btn" style="background: #8e44ad;" onclick="openVisitorKiosk()">📺 Mode Panneau Visiteurs</button>
+                </div>
+            </div>
+
+            <!-- VUE 1 : AGENDA HOURE (Grille visuelle) -->
+            <div id="view-agenda">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #3498db;">Planning des Réunions du Jour</h3>
+                    <button class="success" onclick="openMeetingModal()">+ Nouvelle Réunion</button>
+                </div>
+                <div id="agenda-container" class="agenda-grid-container">
+                    <!-- Rempli dynamiquement -->
+                </div>
+            </div>
+
+            <!-- VUE 2 : LISTE & GUIDANCE VISITEURS -->
+            <div id="view-list" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #3498db;">Guidance des Visiteurs - Réunions Programmées</h3>
+                    <button class="success" onclick="openMeetingModal()">+ Nouvelle Réunion</button>
+                </div>
+                <div id="visitor-list-container">
+                    <!-- Rempli par JS -->
+                </div>
+            </div>
+
+            <!-- VUE 3 : GESTION DES SALLES -->
+            <div id="view-rooms" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #3498db;">Salles de Réunion</h3>
+                    <button class="success" onclick="openRoomModal()">+ Ajouter une Salle</button>
+                </div>
+                <div id="rooms-list-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;">
+                    <!-- Rempli par JS -->
+                </div>
+            </div>
+        </section>
+
+    <!-- MODAL : RÉUNION -->
+    <div id="modal-meeting" class="modal-overlay">
+        <div class="modal-content">
+            <h3 id="modal-meeting-title" style="margin-top: 0; color: #3498db;">Nouvelle Réunion</h3>
+            <input type="hidden" id="meeting-id">
+            
+            <div style="margin-bottom: 12px;">
+                <label>Nom / Objet de la réunion *</label>
+                <input type="text" id="m-title" placeholder="Ex: Comité de Direction, Formation Client">
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label>Salle de Réunion *</label>
+                <select id="m-room"></select>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <div style="flex: 1;">
+                    <label>Heure Début *</label>
+                    <input type="time" id="m-start" value="09:00">
+                </div>
+                <div style="flex: 1;">
+                    <label>Heure Fin *</label>
+                    <input type="time" id="m-end" value="10:00">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label>Organisateur / Inité par</label>
+                <input type="text" id="m-organizer" placeholder="Ex: Mme Dupont, Service RH">
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label>Notes / Consignes pour les visiteurs</label>
+                <textarea id="m-notes" rows="2" placeholder="Ex: Accueil café en salle de pause RDC"></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <button type="button" class="danger" id="btn-delete-meeting" onclick="deleteMeeting()" style="display: none;">Supprimer</button>
+                <div style="display: flex; gap: 10px; margin-left: auto;">
+                    <button type="button" class="secondary" onclick="closeModals()">Annuler</button>
+                    <button type="button" class="success" onclick="saveMeeting()">Enregistrer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL : SALLE DE RÉUNION -->
+    <div id="modal-room" class="modal-overlay">
+        <div class="modal-content">
+            <h3 id="modal-room-title" style="margin-top: 0; color: #3498db;">Nouvelle Salle de Réunion</h3>
+            <input type="hidden" id="room-id">
+
+            <div style="margin-bottom: 12px;">
+                <label>Nom de la Salle *</label>
+                <input type="text" id="r-name" placeholder="Ex: Salle Pasteur, Auditorium Eiffel">
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label>Localisation / Étage</label>
+                <input type="text" id="r-location" placeholder="Ex: 1er Étage - Bâtiment B">
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <div style="flex: 1;">
+                    <label>Capacité (personnes)</label>
+                    <input type="number" id="r-capacity" value="10" min="1">
+                </div>
+                <div style="flex: 1;">
+                    <label>Couleur d'affichage</label>
+                    <input type="color" id="r-color" value="#3498db" style="height: 38px; padding: 2px;">
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <button type="button" class="danger" id="btn-delete-room" onclick="deleteRoom()" style="display: none;">Supprimer</button>
+                <div style="display: flex; gap: 10px; margin-left: auto;">
+                    <button type="button" class="secondary" onclick="closeModals()">Annuler</button>
+                    <button type="button" class="success" onclick="saveRoom()">Enregistrer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const token = localStorage.getItem('pidyn_token');
+        const role = localStorage.getItem('pidyn_role');
+        const userSiteId = localStorage.getItem('pidyn_siteId');
+        if (!token) window.location.href = '/';
+
+        let rooms = [];
+        let meetings = [];
+        let sitesList = [];
+        let currentView = 'agenda';
+
+        const startHour = 8;
+        const endHour = 19;
+        const slotHeight = 50; // px per hour
+
+        async function init() {
+            // Barre de navigation
+            const nav = document.getElementById('main-nav');
+            let html = `<button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>`;
+            if (['admin', 'editor', 'author'].includes(role)) {
+                html += `<button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>`;
+                html += `<button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>`;
+                html += `<button class="secondary" onclick="window.location.href='/planning'">📅 Planning</button>`;
+            }
+            html += `<button class="secondary" onclick="window.location.href='/canteen'">🍴 Cantine</button>`;
+            html += `<button onclick="window.location.href='/meetings'">🏢 Réunions</button>`;
+            if (['admin', 'editor', 'author'].includes(role)) {
+                html += `<button class="secondary" onclick="window.location.href='/mediatheque'">📁 Médiathèque</button>`;
+            }
+            if (role === 'admin') {
+                html += `<button class="secondary" onclick="window.location.href='/users'">👥 Utilisateurs</button>`;
+                html += `<button class="secondary" onclick="window.location.href='/sites'">🏢 Sites</button>`;
+                html += `<button class="secondary" onclick="window.location.href='/systeme'">⚙️ Système</button>`;
+            }
+            nav.innerHTML = html;
+
+            // Date du jour
+            const todayStr = new Date().toISOString().split('T')[0];
+            document.getElementById('date-picker').value = todayStr;
+
+            // Chargement des sites
+            await loadSites();
+            const siteControl = document.getElementById('site-control');
+            if (role === 'admin') {
+                let sHtml = `<select id="site-selector" onchange="loadData()" style="width: 200px; font-weight: bold;">`;
+                sitesList.forEach(s => {
+                    const selected = s.id === userSiteId ? 'selected' : '';
+                    sHtml += `<option value="${s.id}" ${selected}>${s.name}</option>`;
+                });
+                sHtml += `</select>`;
+                siteControl.innerHTML = sHtml;
+            } else {
+                const currentSite = sitesList.find(s => s.id === userSiteId) || { name: userSiteId || 'Site par défaut' };
+                siteControl.innerHTML = `<span style="background: #9b59b6; padding: 6px 12px; border-radius: 4px; font-weight: bold;">${currentSite.name}</span><input type="hidden" id="site-selector" value="${userSiteId || ''}">`;
+            }
+
+            await loadData();
+        }
+
+        async function loadSites() {
+            try {
+                const res = await fetch('/api/admin/sites', { headers: { 'Authorization': `Bearer ${token}` } });
+                if (res.ok) sitesList = await res.json();
+                else {
+                    const res2 = await fetch('/api/admin/data', { headers: { 'Authorization': `Bearer ${token}` } });
+                    const d = await res2.json();
+                    sitesList = d.sites || [];
+                }
+            } catch (e) {
+                sitesList = [{ id: 'site_paris', name: 'Campus Paris' }, { id: 'site_lyon', name: 'Campus Lyon' }];
+            }
+        }
+
+        function getSelectedSiteId() {
+            const sel = document.getElementById('site-selector');
+            return sel ? sel.value : (userSiteId || '');
+        }
+
+        async function loadData() {
+            const dateStr = document.getElementById('date-picker').value;
+            const siteId = getSelectedSiteId();
+
+            const [rRes, mRes] = await Promise.all([
+                fetch(`/api/admin/meeting-rooms?siteId=${encodeURIComponent(siteId)}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+                fetch(`/api/admin/meetings?date=${encodeURIComponent(dateStr)}&siteId=${encodeURIComponent(siteId)}`, { headers: { 'Authorization': `Bearer ${token}` } })
+            ]);
+
+            rooms = await rRes.json();
+            meetings = await mRes.json();
+
+            // Populate room select in meeting modal
+            const mRoomSelect = document.getElementById('m-room');
+            mRoomSelect.innerHTML = rooms.map(r => `<option value="${r.id}">${r.name} (${r.location || 'N/A'})</option>`).join('');
+
+            renderCurrentView();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-view-${view}`).classList.add('active');
+
+            document.getElementById('view-agenda').style.display = view === 'agenda' ? 'block' : 'none';
+            document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
+            document.getElementById('view-rooms').style.display = view === 'rooms' ? 'block' : 'none';
+
+            renderCurrentView();
+        }
+
+        function renderCurrentView() {
+            if (currentView === 'agenda') renderAgenda();
+            else if (currentView === 'list') renderVisitorList();
+            else if (currentView === 'rooms') renderRoomsList();
+        }
+
+        /* 1. RENDU AGENDA VISUEL */
+        function renderAgenda() {
+            const container = document.getElementById('agenda-container');
+            if (rooms.length === 0) {
+                container.innerHTML = `<div style="padding: 40px; text-align: center; color: #bdc3c7;">Aucune salle de réunion configurée pour ce site.<br><br><button class="success" onclick="switchView('rooms')">🏢 Ajouter des salles</button></div>`;
+                return;
+            }
+
+            let html = `<div class="agenda-header"><div class="agenda-time-col-header">Heure</div>`;
+            rooms.forEach(r => {
+                html += `<div class="agenda-room-col-header" style="border-top: 3px solid ${r.color || '#3498db'};">${r.name}<br><span style="font-size: 11px; font-weight: normal; color: #bdc3c7;">${r.location || ''} (${r.capacity} pers.)</span></div>`;
+            });
+            html += `</div><div class="agenda-body">`;
+
+            // Colonne Heures
+            html += `<div class="agenda-time-col">`;
+            for (let h = startHour; h < endHour; h++) {
+                html += `<div class="agenda-time-slot">${h.toString().padStart(2, '0')}:00</div>`;
+            }
+            html += `</div>`;
+
+            // Colonnes par Salle
+            rooms.forEach(r => {
+                html += `<div class="agenda-room-col" data-room-id="${r.id}">`;
+                for (let h = startHour; h < endHour; h++) {
+                    const timeStr = `${h.toString().padStart(2, '0')}:00`;
+                    html += `<div class="agenda-room-slot" onclick="openMeetingModal(null, '${r.id}', '${timeStr}')"></div>`;
+                }
+
+                // Placer les réunions sur cette salle
+                const roomMeetings = meetings.filter(m => m.roomId === r.id);
+                roomMeetings.forEach(m => {
+                    const start = new Date(m.startTime);
+                    const end = new Date(m.endTime);
+
+                    const startH = start.getHours() + (start.getMinutes() / 60);
+                    const endH = end.getHours() + (end.getMinutes() / 60);
+
+                    if (endH > startHour && startH < endHour) {
+                        const topPx = Math.max(0, (startH - startHour) * slotHeight);
+                        const heightPx = Math.max(25, (endH - Math.max(startHour, startH)) * slotHeight);
+
+                        const color = r.color || '#3498db';
+                        const timeRange = `${start.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
+
+                        html += `<div class="meeting-card" style="top: ${topPx}px; height: ${heightPx}px; background: ${color};" onclick="event.stopPropagation(); openMeetingModal('${m.id}')">
+                            <div class="meeting-title">${escapeHtml(m.title)}</div>
+                            <div class="meeting-time">⏰ ${timeRange} ${m.organizer ? '• ' + escapeHtml(m.organizer) : ''}</div>
+                        </div>`;
+                    }
+                });
+
+                html += `</div>`;
+            });
+
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        /* 2. RENDU LISTE GUIDANCE VISITEURS */
+        function renderVisitorList() {
+            const container = document.getElementById('visitor-list-container');
+            if (meetings.length === 0) {
+                container.innerHTML = `<div style="padding: 40px; text-align: center; color: #bdc3c7; background: #2c3e50; border-radius: 8px;">Aucune réunion programmée pour cette date.</div>`;
+                return;
+            }
+
+            const now = new Date();
+            let html = '';
+
+            meetings.forEach(m => {
+                const room = rooms.find(r => r.id === m.roomId) || { name: 'Salle inconnue', location: '', color: '#3498db' };
+                const start = new Date(m.startTime);
+                const end = new Date(m.endTime);
+
+                let statusText = 'À VENIR';
+                let statusClass = 'status-next';
+
+                if (now >= start && now <= end) {
+                    statusText = 'EN COURS';
+                    statusClass = 'status-now';
+                } else if (now > end) {
+                    statusText = 'TERMINÉE';
+                    statusClass = 'status-past';
+                }
+
+                const timeRange = `${start.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})} - ${end.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
+
+                html += `<div class="visitor-card" style="border-left-color: ${room.color || '#3498db'};">
+                    <div>
+                        <div style="font-size: 18px; font-weight: bold; color: white; margin-bottom: 4px;">${escapeHtml(m.title)}</div>
+                        <div style="color: #3498db; font-weight: bold; font-size: 14px; margin-bottom: 6px;">
+                            📍 ${escapeHtml(room.name)} ${room.location ? `(${escapeHtml(room.location)})` : ''}
+                        </div>
+                        <div style="font-size: 13px; color: #bdc3c7;">
+                            ⏰ ${timeRange} ${m.organizer ? `| Organisé par : <b>${escapeHtml(m.organizer)}</b>` : ''}
+                        </div>
+                        ${m.notes ? `<div style="font-size: 12px; color: #f39c12; margin-top: 6px;">ℹ️ ${escapeHtml(m.notes)}</div>` : ''}
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="visitor-status ${statusClass}">${statusText}</span>
+                        <div style="margin-top: 10px;">
+                            <button class="secondary" style="padding: 4px 10px; font-size: 12px;" onclick="openMeetingModal('${m.id}')">✏️ Modifier</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        /* 3. RENDU GESTION DES SALLES */
+        function renderRoomsList() {
+            const container = document.getElementById('rooms-list-container');
+            if (rooms.length === 0) {
+                container.innerHTML = `<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: #bdc3c7; background: #2c3e50; border-radius: 8px;">Aucune salle créée pour le moment.</div>`;
+                return;
+            }
+
+            let html = '';
+            rooms.forEach(r => {
+                html += `<div style="background: #2c3e50; border-radius: 8px; padding: 18px; border-top: 4px solid ${r.color || '#3498db'}; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                        <h4 style="margin: 0; color: white; font-size: 16px;">${escapeHtml(r.name)}</h4>
+                        <span style="background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 4px; font-size: 11px;">👥 ${r.capacity} pers.</span>
+                    </div>
+                    <div style="font-size: 13px; color: #bdc3c7; margin-bottom: 15px;">
+                        📍 ${escapeHtml(r.location || 'Localisation non spécifiée')}
+                    </div>
+                    <button class="secondary" style="width: 100%;" onclick="openRoomModal('${r.id}')">✏️ Modifier la salle</button>
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        /* MODALS LOGIC */
+        function openMeetingModal(meetingId = null, defaultRoomId = null, defaultTime = '09:00') {
+            if (rooms.length === 0) return alert('Veuillez d\'abord ajouter au moins une salle de réunion.');
+
+            document.getElementById('modal-meeting').style.display = 'flex';
+            const dateStr = document.getElementById('date-picker').value;
+
+            if (meetingId) {
+                const m = meetings.find(x => x.id === meetingId);
+                if (!m) return;
+                document.getElementById('modal-meeting-title').innerText = 'Modifier la Réunion';
+                document.getElementById('meeting-id').value = m.id;
+                document.getElementById('m-title').value = m.title;
+                document.getElementById('m-room').value = m.roomId;
+
+                const startDate = new Date(m.startTime);
+                const endDate = new Date(m.endTime);
+                document.getElementById('m-start').value = startDate.toTimeString().substring(0, 5);
+                document.getElementById('m-end').value = endDate.toTimeString().substring(0, 5);
+
+                document.getElementById('m-organizer').value = m.organizer || '';
+                document.getElementById('m-notes').value = m.notes || '';
+                document.getElementById('btn-delete-meeting').style.display = 'block';
+            } else {
+                document.getElementById('modal-meeting-title').innerText = 'Nouvelle Réunion';
+                document.getElementById('meeting-id').value = '';
+                document.getElementById('m-title').value = '';
+                if (defaultRoomId) document.getElementById('m-room').value = defaultRoomId;
+                
+                document.getElementById('m-start').value = defaultTime;
+                
+                // End time default: +1h
+                const [h, min] = defaultTime.split(':').map(Number);
+                const endH = Math.min(23, h + 1);
+                document.getElementById('m-end').value = `${endH.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}`;
+                
+                document.getElementById('m-organizer').value = '';
+                document.getElementById('m-notes').value = '';
+                document.getElementById('btn-delete-meeting').style.display = 'none';
+            }
+        }
+
+        async function saveMeeting() {
+            const id = document.getElementById('meeting-id').value;
+            const title = document.getElementById('m-title').value.trim();
+            const roomId = document.getElementById('m-room').value;
+            const startTimeVal = document.getElementById('m-start').value;
+            const endTimeVal = document.getElementById('m-end').value;
+            const organizer = document.getElementById('m-organizer').value.trim();
+            const notes = document.getElementById('m-notes').value.trim();
+
+            if (!title || !roomId || !startTimeVal || !endTimeVal) {
+                return alert('Veuillez remplir les champs obligatoires (Titre, Salle, Début et Fin).');
+            }
+
+            const dateStr = document.getElementById('date-picker').value;
+            const startTime = `${dateStr}T${startTimeVal}:00`;
+            const endTime = `${dateStr}T${endTimeVal}:00`;
+            const siteId = getSelectedSiteId();
+
+            const res = await fetch('/api/admin/meetings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ id, title, roomId, startTime, endTime, organizer, notes, siteId })
+            });
+
+            if (res.ok) {
+                closeModals();
+                loadData();
+            } else {
+                alert('Erreur lors de la sauvegarde : ' + await res.text());
+            }
+        }
+
+        async function deleteMeeting() {
+            const id = document.getElementById('meeting-id').value;
+            if (!id || !confirm('Confirmer la suppression de cette réunion ?')) return;
+
+            const res = await fetch(`/api/admin/meetings/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                closeModals();
+                loadData();
+            }
+        }
+
+        function openRoomModal(roomId = null) {
+            document.getElementById('modal-room').style.display = 'flex';
+            if (roomId) {
+                const r = rooms.find(x => x.id === roomId);
+                if (!r) return;
+                document.getElementById('modal-room-title').innerText = 'Modifier la Salle';
+                document.getElementById('room-id').value = r.id;
+                document.getElementById('r-name').value = r.name;
+                document.getElementById('r-location').value = r.location || '';
+                document.getElementById('r-capacity').value = r.capacity || 10;
+                document.getElementById('r-color').value = r.color || '#3498db';
+                document.getElementById('btn-delete-room').style.display = 'block';
+            } else {
+                document.getElementById('modal-room-title').innerText = 'Nouvelle Salle de Réunion';
+                document.getElementById('room-id').value = '';
+                document.getElementById('r-name').value = '';
+                document.getElementById('r-location').value = '';
+                document.getElementById('r-capacity').value = '10';
+                document.getElementById('r-color').value = '#3498db';
+                document.getElementById('btn-delete-room').style.display = 'none';
+            }
+        }
+
+        async function saveRoom() {
+            const id = document.getElementById('room-id').value;
+            const name = document.getElementById('r-name').value.trim();
+            const location = document.getElementById('r-location').value.trim();
+            const capacity = document.getElementById('r-capacity').value;
+            const color = document.getElementById('r-color').value;
+
+            if (!name) return alert('Le nom de la salle est obligatoire.');
+
+            const siteId = getSelectedSiteId();
+
+            const res = await fetch('/api/admin/meeting-rooms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ id, name, location, capacity, color, siteId })
+            });
+
+            if (res.ok) {
+                closeModals();
+                loadData();
+            } else {
+                alert('Erreur lors de la sauvegarde : ' + await res.text());
+            }
+        }
+
+        async function deleteRoom() {
+            const id = document.getElementById('room-id').value;
+            if (!id || !confirm('Supprimer cette salle ? Toutes les réunions associées seront également supprimées.')) return;
+
+            const res = await fetch(`/api/admin/meeting-rooms/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                closeModals();
+                loadData();
+            }
+        }
+
+        function closeModals() {
+            document.getElementById('modal-meeting').style.display = 'none';
+            document.getElementById('modal-room').style.display = 'none';
+        }
+
+        function openVisitorKiosk() {
+            const siteId = getSelectedSiteId();
+            const dateStr = document.getElementById('date-picker').value;
+            const w = window.open('', '_blank');
+            w.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Panneau de Guidance Visiteurs</title>
+                    <style>
+                        body { font-family: sans-serif; background: #0f172a; color: white; margin: 0; padding: 40px; }
+                        h1 { color: #38bdf8; font-size: 38px; margin-bottom: 5px; }
+                        .subtitle { font-size: 20px; color: #94a3b8; margin-bottom: 40px; }
+                        .card { background: #1e293b; border-radius: 12px; padding: 25px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; border-left: 8px solid #38bdf8; box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
+                        .title { font-size: 26px; font-weight: bold; color: white; margin-bottom: 8px; }
+                        .room { font-size: 22px; color: #38bdf8; font-weight: bold; }
+                        .time { font-size: 20px; color: #cbd5e1; }
+                        .badge { padding: 8px 16px; border-radius: 20px; font-weight: bold; font-size: 16px; background: #22c55e; color: #052e16; }
+                    </style>
+                </head>
+                <body>
+                    <h1>🏢 Bienvenue • Guidance des Visiteurs</h1>
+                    <div class="subtitle" id="clock">Chargement...</div>
+                    <div id="kiosk-list"></div>
+                    <script>
+                        async function refresh() {
+                            const res = await fetch('/api/player/meetings/today?siteId=${encodeURIComponent(siteId)}&date=${encodeURIComponent(dateStr)}');
+                            const d = await res.json();
+                            document.getElementById('clock').innerText = 'Réunions du ' + new Date(d.date).toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+                            let html = '';
+                            if (d.meetings.length === 0) {
+                                html = '<div style="font-size: 24px; color: #94a3b8; text-align: center; margin-top: 100px;">Aucune réunion programmée aujourd'hui.</div>';
+                            } else {
+                                d.meetings.forEach(m => {
+                                    const r = d.rooms.find(x => x.id === m.roomId) || { name: 'Salle', location: '' };
+                                    const start = new Date(m.startTime).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+                                    const end = new Date(m.endTime).toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+                                    html += \`<div class="card" style="border-left-color: \${r.color || '#38bdf8'};">
+                                        <div>
+                                            <div class="title">\${m.title}</div>
+                                            <div class="room">📍 \${r.name} \${r.location ? '(' + r.location + ')' : ''}</div>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div class="time">⏰ \${start} - \${end}</div>
+                                            \${m.organizer ? '<div style="font-size: 16px; color: #94a3b8; margin-top: 5px;">Invité par : ' + m.organizer + '</div>' : ''}
+                                        </div>
+                                    </div>\`;
+                                });
+                            }
+                            document.getElementById('kiosk-list').innerHTML = html;
+                        }
+                        refresh();
+                        setInterval(refresh, 15000);
+                    <\/script>
+                </body>
+                </html>
+            `);
+        }
+
+        function logout() {
+            localStorage.removeItem('pidyn_token');
+            localStorage.removeItem('pidyn_role');
+            localStorage.removeItem('pidyn_username');
+            localStorage.removeItem('pidyn_siteId');
+            window.location.href = '/';
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        init();
+    </script>
+
+    <footer style="text-align: center; margin-top: 40px; padding: 20px; font-size: 12px; color: #7f8c8d; border-top: 1px solid #34495e;">
+        OmniSign est sous <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: #3498db; text-decoration: none;">licence MIT</a> - Auteur : <a href="https://github.com/gotenash" target="_blank" style="color: #3498db; text-decoration: none;">gotenash</a>
+    </footer>
+</body>
+</html>

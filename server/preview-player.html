@@ -163,12 +163,72 @@
             // Rendu des Templates
             if (page.template) {
                 tplLayer.style.display = 'flex';
-                tplLayer.style.padding = page.template === 'video_fullscreen' ? '0' : '20px';
+                tplLayer.style.padding = page.template === 'video_fullscreen' ? '0' : '80px 20px 20px 20px';
                 
                 if (page.template === 'canteen') {
-                    tplLayer.innerHTML = `<div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px;">${page.data.title || 'MENU'}</div><div><p><b>Entrée:</b> ${page.data.starter || ''}</p><p><b>Plat:</b> ${page.data.main || ''}</p><p><b>Dessert:</b> ${page.data.dessert || ''}</p></div>`;
+                    if (page.data && page.data.useLiveMenu) {
+                        const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+                        const today = dayNames[new Date().getDay()];
+                        const sId = (playlistData && playlistData.siteId) ? playlistData.siteId : '';
+                        tplLayer.innerHTML = `<div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px;">${page.data.title || 'MENU CANTINE'} (${today})</div><div id="prev-canteen-content">Chargement du menu du jour...</div>`;
+                        fetch(`/api/player/canteen/current?siteId=${encodeURIComponent(sId)}`)
+                            .then(r => r.json())
+                            .then(weekData => {
+                                const menu = weekData[today] || { starter: 'Non renseignée', main: 'Non renseigné', dessert: 'Non renseigné' };
+                                const cDiv = document.getElementById('prev-canteen-content');
+                                if (cDiv) cDiv.innerHTML = `<p><b>Entrée:</b> ${menu.starter || 'Non renseignée'}</p><p><b>Plat:</b> ${menu.main || 'Non renseigné'}</p><p><b>Dessert:</b> ${menu.dessert || 'Non renseigné'}</p>`;
+                            }).catch(() => {});
+                    } else {
+                        tplLayer.innerHTML = `<div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px;">${page.data.title || 'MENU CANTINE'}</div><div><p><b>Entrée:</b> ${page.data.starter || 'Non renseignée'}</p><p><b>Plat:</b> ${page.data.main || 'Non renseigné'}</p><p><b>Dessert:</b> ${page.data.dessert || 'Non renseigné'}</p></div>`;
+                    }
                 } else if (page.template === 'meeting') {
-                    tplLayer.innerHTML = `<div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${page.data.room || ''}</div><div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${page.data.subject || ''}</div><div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${page.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${page.data.status || ''}</div>`;
+                    if (page.data && page.data.useLiveMeeting) {
+                        const sId = (playlistData && playlistData.siteId) ? playlistData.siteId : '';
+                        tplLayer.innerHTML = `<div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${page.data.room || 'Toutes les Salles'}</div><div id="prev-meeting-content">Chargement des réunions...</div>`;
+                        fetch(`/api/player/meetings/today?siteId=${encodeURIComponent(sId)}`)
+                            .then(r => r.json())
+                            .then(data => {
+                                const allMeetings = data.meetings || [];
+                                const now = new Date();
+                                const activeMeetings = allMeetings.filter(m => {
+                                    if (!m.endTime) return true;
+                                    let endIso = m.endTime;
+                                    if (!endIso.includes('T')) {
+                                        const todayStr = now.toISOString().split('T')[0];
+                                        endIso = `${todayStr}T${m.endTime}`;
+                                    }
+                                    const endDate = new Date(endIso);
+                                    return isNaN(endDate.getTime()) || endDate > now;
+                                });
+                                const mDiv = document.getElementById('prev-meeting-content');
+                                if (!mDiv) return;
+                                if (activeMeetings.length === 0) {
+                                    mDiv.innerHTML = `<div style="color:#2ecc71; font-size:20px; font-weight:bold;">🟢 Aucune réunion à venir</div>`;
+                                } else {
+                                    const firstM = activeMeetings[0];
+                                    const room = (data.rooms || []).find(r => r.id === firstM.roomId) || { name: page.data.room || 'Salle' };
+                                    const start = firstM.startTime ? (firstM.startTime.includes('T') ? firstM.startTime.substring(11, 16) : firstM.startTime) : '';
+                                    const end = firstM.endTime ? (firstM.endTime.includes('T') ? firstM.endTime.substring(11, 16) : firstM.endTime) : '';
+                                    
+                                    let startIso = firstM.startTime;
+                                    let endIso = firstM.endTime;
+                                    if (startIso && !startIso.includes('T')) {
+                                        const todayStr = now.toISOString().split('T')[0];
+                                        startIso = `${todayStr}T${startIso}`;
+                                    }
+                                    if (endIso && !endIso.includes('T')) {
+                                        const todayStr = now.toISOString().split('T')[0];
+                                        endIso = `${todayStr}T${endIso}`;
+                                    }
+                                    const isInProgress = (now >= new Date(startIso) && now < new Date(endIso));
+                                    const badge = isInProgress ? `<span style="color:#e74c3c; font-weight:bold;">🔴 EN COURS</span>` : `<span style="color:#3498db; font-weight:bold;">🔵 PROCHAINE RÉUNION</span>`;
+                                    
+                                    mDiv.innerHTML = `<div style="font-size:22px; font-weight:bold; margin-bottom:5px;">📍 ${room.name} : ${firstM.title}</div><div style="color:#bdc3c7; font-size:16px;">⏰ ${start} - ${end} • ${badge}</div>`;
+                                }
+                            }).catch(() => {});
+                    } else {
+                        tplLayer.innerHTML = `<div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${page.data.room || 'Salle de Réunion'}</div><div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${page.data.subject || 'Sujet de la réunion'}</div><div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${(page.data.status || 'Disponible') === 'Disponible' ? '#27ae60' : '#e74c3c'}; color:white; font-weight:bold;">${page.data.status || 'Disponible'}</div>`;
+                    }
                 } else if (page.template === 'video_fullscreen') {
                     if (page.data && page.data.videoUrl) {
                         let html = `<video src="${withPreviewAuth(page.data.videoUrl)}" autoplay playsinline ${page.data.muted ? 'muted' : ''} ${page.data.loop ? 'loop' : ''} style="width:100%; height:100%; object-fit:${page.data.fitMode || 'cover'};"></video>`;

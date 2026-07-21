@@ -109,7 +109,8 @@ const defaultData = {
         { username: 'admin', password: '123456', role: 'admin' },
         { username: 'editeur', password: '123456', role: 'editor' },
         { username: 'auteur', password: '123456', role: 'author' },
-        { username: 'cuisinier', password: '123456', role: 'cook' }
+        { username: 'cuisinier', password: '123456', role: 'cook' },
+        { username: 'secretaire', password: '123456', role: 'secretary' }
     ],
     settings: {
         jwtSecret: 'your_jwt_secret_key_very_secret_and_long',
@@ -457,11 +458,28 @@ async function initializeDatabase() {
     await db.schema.hasTable('canteen_menus').then(async (exists) => {
         if (!exists) {
             await db.schema.createTable('canteen_menus', (table) => {
-                table.string('week_id').primary(); // Format: YYYY-WW
+                table.string('id').primary(); // Format: siteId_weekId
+                table.string('siteId').notNullable();
+                table.string('week_id').notNullable();
                 table.json('data').notNullable();  // Stocke l'objet menu complet
                 table.timestamp('updatedAt').defaultTo(db.fn.now());
             });
             console.log('Table "canteen_menus" créée.');
+        } else {
+            const hasId = await db.schema.hasColumn('canteen_menus', 'id');
+            if (!hasId) {
+                await db.schema.table('canteen_menus', (table) => {
+                    table.string('id').nullable();
+                });
+                console.log('Colonne "id" ajoutée à la table "canteen_menus".');
+            }
+            const hasSiteId = await db.schema.hasColumn('canteen_menus', 'siteId');
+            if (!hasSiteId) {
+                await db.schema.table('canteen_menus', (table) => {
+                    table.string('siteId').defaultTo('site_paris');
+                });
+                console.log('Colonne "siteId" ajoutée à la table "canteen_menus".');
+            }
         }
     });
 
@@ -474,6 +492,42 @@ async function initializeDatabase() {
                 table.string('description');
             });
             console.log('Table "sites" créée.');
+        }
+    });
+
+    // Table meeting_rooms (Salles de réunion)
+    await db.schema.hasTable('meeting_rooms').then(async (exists) => {
+        if (!exists) {
+            await db.schema.createTable('meeting_rooms', (table) => {
+                table.string('id').primary();
+                table.string('name').notNullable();
+                table.string('siteId').notNullable();
+                table.integer('capacity').defaultTo(10);
+                table.string('location').defaultTo('');
+                table.string('color').defaultTo('#3498db');
+                table.timestamp('createdAt').defaultTo(db.fn.now());
+            });
+            console.log('Table "meeting_rooms" créée.');
+        }
+    });
+
+    // Table meetings (Réunions / Agenda)
+    await db.schema.hasTable('meetings').then(async (exists) => {
+        if (!exists) {
+            await db.schema.createTable('meetings', (table) => {
+                table.string('id').primary();
+                table.string('title').notNullable();
+                table.string('roomId').notNullable();
+                table.string('siteId').notNullable();
+                table.string('organizer').defaultTo('');
+                table.string('startTime').notNullable();
+                table.string('endTime').notNullable();
+                table.text('notes').defaultTo('');
+                table.string('status').defaultTo('confirmed');
+                table.string('createdBy').defaultTo('');
+                table.timestamp('createdAt').defaultTo(db.fn.now());
+            });
+            console.log('Table "meetings" créée.');
         }
     });
 
@@ -826,6 +880,14 @@ app.get('/mediatheque', (req, res) => {
     res.sendFile(path.join(__dirname, 'media.html'));
 });
 
+// Route pour la page de gestion des réunions et salles
+app.get('/meetings', (req, res) => {
+    res.sendFile(path.join(__dirname, 'meetings.html'));
+});
+app.get('/reunions', (req, res) => {
+    res.sendFile(path.join(__dirname, 'meetings.html'));
+});
+
 // Helper to get file type from mimetype or extension
 const getFileType = (mimetype, filename) => {
     if (mimetype.startsWith('image/')) return 'image';
@@ -853,7 +915,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // API Admin : Lister les players et affecter des playlists
-app.get('/api/admin/data', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook']), (req, res) => {
+app.get('/api/admin/data', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook', 'secretary']), (req, res) => {
     const playersQuery = filterBySiteId(db('players').select('*'), req.user);
     const playlistsQuery = filterBySiteId(db('playlists').select('*'), req.user);
     const sequencesQuery = filterBySiteId(db('sequences').select('*'), req.user);
@@ -1926,6 +1988,675 @@ app.delete('/api/admin/system/cookies', authMiddleware, checkRole(['admin']), as
         res.json({ success: true });
     } catch (err) {
         res.status(500).send(err.message);
+    }
+});
+
+// --- API GESTION DES MENUS DE CANTINE MULTI-SITES & MULTI-SEMAINES ---
+
+// Helper pour calculer la semaine ISO (ex: 2026-W29 -> 2026-29)
+const getIsoWeekString = (dateObj = new Date()) => {
+    const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const year = d.getUTCFullYear();
+    const oneJan = new Date(Date.UTC(year, 0, 1));
+    const weekNo = Math.ceil((((d - oneJan) / 86400000) + 1) / 7);
+    return `${year}-${weekNo.toString().padStart(2, '0')}`;
+};
+
+// GET /api/admin/canteen/:weekId - Récupérer le menu d'une semaine pour un site donné
+app.get('/api/admin/canteen/:weekId', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook']), async (req, res) => {
+    try {
+        let { weekId } = req.params;
+        weekId = weekId.replace('-W', '-');
+        
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && req.query.siteId) {
+            targetSiteId = req.query.siteId;
+        }
+        if (!targetSiteId) {
+            const firstSite = await db('sites').first();
+            targetSiteId = firstSite ? firstSite.id : 'site_paris';
+        }
+
+        const menuId = `${targetSiteId}_${weekId}`;
+        const record = await db('canteen_menus').where({ id: menuId }).first() 
+                    || await db('canteen_menus').where({ week_id: menuId }).first()
+                    || await db('canteen_menus').where({ siteId: targetSiteId, week_id: weekId }).first()
+                    || await db('canteen_menus').where({ week_id: weekId }).first();
+
+        if (record) {
+            const dataObj = typeof record.data === 'string' ? JSON.parse(record.data) : record.data;
+            res.json({ weekId, siteId: targetSiteId, data: dataObj });
+        } else {
+            res.json({ weekId, siteId: targetSiteId, data: {} });
+        }
+    } catch (err) {
+        console.error("Erreur GET /api/admin/canteen/:weekId:", err);
+        res.status(500).send("Erreur lors de la récupération du menu de la cantine.");
+    }
+});
+
+// POST /api/admin/canteen - Enregistrer / Mettre à jour le menu d'une semaine pour un site
+app.post('/api/admin/canteen', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook']), async (req, res) => {
+    try {
+        let { weekId, data, siteId } = req.body;
+        if (!weekId || !data) return res.status(400).send('weekId et data sont requis.');
+        weekId = weekId.replace('-W', '-');
+
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && siteId) {
+            targetSiteId = siteId;
+        }
+        if (!targetSiteId) {
+            const firstSite = await db('sites').first();
+            targetSiteId = firstSite ? firstSite.id : 'site_paris';
+        }
+
+        const menuId = `${targetSiteId}_${weekId}`;
+        const existing = await db('canteen_menus').where({ id: menuId }).first()
+                     || await db('canteen_menus').where({ week_id: menuId }).first()
+                     || await db('canteen_menus').where({ siteId: targetSiteId, week_id: weekId }).first();
+
+        const payload = {
+            id: menuId,
+            siteId: targetSiteId,
+            week_id: menuId, // Guarantees uniqueness on legacy databases where week_id is UNIQUE primary key
+            data: JSON.stringify(data),
+            updatedAt: new Date()
+        };
+
+        if (existing) {
+            await db('canteen_menus').where({ id: existing.id || existing.week_id || menuId }).update(payload);
+        } else {
+            try {
+                await db('canteen_menus').insert(payload);
+            } catch (e) {
+                await db('canteen_menus').insert({
+                    week_id: menuId,
+                    data: JSON.stringify(data),
+                    updatedAt: new Date()
+                });
+            }
+        }
+
+        res.json({ success: true, message: `Menu enregistré pour la semaine ${weekId} (Site: ${targetSiteId})` });
+    } catch (err) {
+        console.error("Erreur POST /api/admin/canteen:", err);
+        res.status(500).send("Erreur lors de la sauvegarde du menu de la cantine : " + err.message);
+    }
+});
+
+// GET /api/player/canteen/current - Endpoint live pour les Players / Diaporamas
+app.get('/api/player/canteen/current', async (req, res) => {
+    try {
+        const { deviceId, siteId: paramSiteId, weekId: paramWeekId } = req.query;
+        let targetSiteId = (paramSiteId && paramSiteId !== 'undefined' && paramSiteId !== 'null') ? paramSiteId : null;
+
+        if (deviceId && deviceId !== 'undefined' && deviceId !== 'null' && !targetSiteId) {
+            const player = await db('players').where({ id: deviceId }).first();
+            if (player) targetSiteId = player.siteId;
+        }
+
+        if (!targetSiteId) {
+            const canteenRecord = await db('canteen_menus').first();
+            if (canteenRecord && canteenRecord.siteId) {
+                targetSiteId = canteenRecord.siteId;
+            } else {
+                const firstSite = await db('sites').first();
+                targetSiteId = firstSite ? firstSite.id : 'site_paris';
+            }
+        }
+
+        const currentWeekId = paramWeekId ? paramWeekId.replace('-W', '-') : getIsoWeekString(new Date());
+        const menuId = `${targetSiteId}_${currentWeekId}`;
+
+        const record = await db('canteen_menus').where({ id: menuId }).first()
+                    || await db('canteen_menus').where({ week_id: menuId }).first()
+                    || await db('canteen_menus').where({ siteId: targetSiteId, week_id: currentWeekId }).first()
+                    || await db('canteen_menus').where({ week_id: currentWeekId }).first();
+
+        if (record) {
+            const dataObj = typeof record.data === 'string' ? JSON.parse(record.data) : record.data;
+            res.json(dataObj);
+        } else {
+            res.json({});
+        }
+    } catch (err) {
+        console.error("Erreur GET /api/player/canteen/current:", err);
+        res.json({});
+    }
+});
+
+// --- API GESTION DES SALLES DE RÉUNION ET RÉUNIONS (AGENDA & GUIDANCE VISITEURS) ---
+
+// 1. SALLES DE RÉUNION (Meeting Rooms)
+app.get('/api/admin/meeting-rooms', authMiddleware, checkRole(['admin', 'editor', 'author', 'secretary']), async (req, res) => {
+    try {
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && req.query.siteId) {
+            targetSiteId = req.query.siteId;
+        }
+        
+        let query = db('meeting_rooms').select('*');
+        if (targetSiteId) {
+            query = query.where({ siteId: targetSiteId });
+        }
+        const rooms = await query.orderBy('name', 'asc');
+        res.json(rooms);
+    } catch (err) {
+        res.status(500).send('Erreur lors de la récupération des salles : ' + err.message);
+    }
+});
+
+app.post('/api/admin/meeting-rooms', authMiddleware, checkRole(['admin', 'editor', 'secretary']), async (req, res) => {
+    try {
+        const { id, name, capacity, location, color, siteId } = req.body;
+        if (!name) return res.status(400).send('Le nom de la salle est requis.');
+
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && siteId) {
+            targetSiteId = siteId;
+        }
+        if (!targetSiteId) {
+            const firstSite = await db('sites').first();
+            targetSiteId = firstSite ? firstSite.id : 'site_paris';
+        }
+
+        const roomId = id || `room_${Date.now()}`;
+        const roomData = {
+            id: roomId,
+            name: name.trim(),
+            siteId: targetSiteId,
+            capacity: parseInt(capacity, 10) || 10,
+            location: (location || '').trim(),
+            color: color || '#3498db'
+        };
+
+        const existing = await db('meeting_rooms').where({ id: roomId }).first();
+        if (existing) {
+            await db('meeting_rooms').where({ id: roomId }).update(roomData);
+        } else {
+            await db('meeting_rooms').insert(roomData);
+        }
+        res.json({ success: true, room: roomData });
+    } catch (err) {
+        res.status(500).send('Erreur lors de la sauvegarde de la salle : ' + err.message);
+    }
+});
+
+app.delete('/api/admin/meeting-rooms/:id', authMiddleware, checkRole(['admin', 'secretary']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db('meetings').where({ roomId: id }).del();
+        await db('meeting_rooms').where({ id }).del();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).send('Erreur lors de la suppression de la salle : ' + err.message);
+    }
+});
+
+// 2. RÉUNIONS / AGENDA (Meetings)
+app.get('/api/admin/meetings', authMiddleware, checkRole(['admin', 'editor', 'author', 'secretary']), async (req, res) => {
+    try {
+        const { date, siteId } = req.query;
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && siteId) {
+            targetSiteId = siteId;
+        }
+
+        let query = db('meetings').select('*');
+        if (targetSiteId) {
+            query = query.where({ siteId: targetSiteId });
+        }
+        if (date) {
+            query = query.where('startTime', 'like', `${date}%`);
+        }
+        const meetings = await query.orderBy('startTime', 'asc');
+        res.json(meetings);
+    } catch (err) {
+        res.status(500).send('Erreur lors de la récupération des réunions : ' + err.message);
+    }
+});
+
+app.post('/api/admin/meetings', authMiddleware, checkRole(['admin', 'editor', 'author', 'secretary']), async (req, res) => {
+    try {
+        const { id, title, roomId, startTime, endTime, organizer, notes, siteId } = req.body;
+        if (!title || !roomId || !startTime || !endTime) {
+            return res.status(400).send('Titre, salle, heure de début et heure de fin sont requis.');
+        }
+
+        let targetSiteId = req.user.siteId;
+        if (req.user.role === 'admin' && siteId) {
+            targetSiteId = siteId;
+        }
+        if (!targetSiteId) {
+            const room = await db('meeting_rooms').where({ id: roomId }).first();
+            targetSiteId = room ? room.siteId : 'site_paris';
+        }
+
+        const meetingId = id || `mtg_${Date.now()}`;
+        const payload = {
+            id: meetingId,
+            title: title.trim(),
+            roomId,
+            siteId: targetSiteId,
+            organizer: (organizer || '').trim(),
+            startTime,
+            endTime,
+            notes: (notes || '').trim(),
+            status: 'confirmed',
+            createdBy: req.user.username
+        };
+
+        const existing = await db('meetings').where({ id: meetingId }).first();
+        if (existing) {
+            await db('meetings').where({ id: meetingId }).update(payload);
+        } else {
+            await db('meetings').insert(payload);
+        }
+        res.json({ success: true, meeting: payload });
+    } catch (err) {
+        res.status(500).send('Erreur lors de la sauvegarde de la réunion : ' + err.message);
+    }
+});
+
+app.delete('/api/admin/meetings/:id', authMiddleware, checkRole(['admin', 'editor', 'secretary']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db('meetings').where({ id }).del();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).send('Erreur lors de la suppression de la réunion : ' + err.message);
+    }
+});
+
+// 3. API LIVE POUR LES PLAYERS & PANNEAUX D'ORIENTATION DES VISITEURS
+app.get('/api/player/meetings/today', async (req, res) => {
+    try {
+        const { deviceId, siteId: paramSiteId, date: paramDate } = req.query;
+        let targetSiteId = (paramSiteId && paramSiteId !== 'undefined' && paramSiteId !== 'null') ? paramSiteId : null;
+
+        if (deviceId && deviceId !== 'undefined' && deviceId !== 'null' && !targetSiteId) {
+            const player = await db('players').where({ id: deviceId }).first();
+            if (player) targetSiteId = player.siteId;
+        }
+
+        if (!targetSiteId) {
+            const meetingRecord = await db('meetings').first();
+            if (meetingRecord && meetingRecord.siteId) {
+                targetSiteId = meetingRecord.siteId;
+            } else {
+                const firstSite = await db('sites').first();
+                targetSiteId = firstSite ? firstSite.id : 'site_paris';
+            }
+        }
+
+        const todayStr = paramDate || new Date().toISOString().split('T')[0];
+
+        const rooms = await db('meeting_rooms').where({ siteId: targetSiteId }).orderBy('name', 'asc');
+        const meetings = await db('meetings')
+            .where({ siteId: targetSiteId })
+            .where('startTime', 'like', `${todayStr}%`)
+            .orderBy('startTime', 'asc');
+
+        res.json({
+            date: todayStr,
+            siteId: targetSiteId,
+            rooms,
+            meetings
+        });
+    } catch (err) {
+        console.error("Erreur API player meetings:", err);
+        res.json({ rooms: [], meetings: [] });
+    }
+});
+
+// --- API JEU DE DONNÉES DE DÉMONSTRATION (5 COLLÈGES) ---
+
+// Helper pour connaître le statut du jeu de données de démo
+app.get('/api/admin/system/demo-data/status', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        const demoSitesCount = await db('sites').where('id', 'like', 'demo_%').count('id as count');
+        const demoUsersCount = await db('users').where('email', 'like', '%@kikoo.ovh').count('id as count');
+        const count = (demoSitesCount[0] ? demoSitesCount[0].count : 0) + (demoUsersCount[0] ? demoUsersCount[0].count : 0);
+        res.json({ exists: count > 0, sitesCount: demoSitesCount[0] ? demoSitesCount[0].count : 0, usersCount: demoUsersCount[0] ? demoUsersCount[0].count : 0 });
+    } catch (err) {
+        res.status(500).send(err.message);
+    }
+});
+
+// Helper de suppression sélective des données démo uniquement
+async function deleteDemoData() {
+    const hasMeetings = await db.schema.hasTable('meetings');
+    if (hasMeetings) await db('meetings').where('id', 'like', 'demo_%').orWhere('siteId', 'like', 'demo_%').del();
+
+    const hasRooms = await db.schema.hasTable('meeting_rooms');
+    if (hasRooms) await db('meeting_rooms').where('id', 'like', 'demo_%').orWhere('siteId', 'like', 'demo_%').del();
+
+    const hasCanteen = await db.schema.hasTable('canteen_menus');
+    if (hasCanteen) {
+        const hasIdCol = await db.schema.hasColumn('canteen_menus', 'id');
+        const hasSiteIdCol = await db.schema.hasColumn('canteen_menus', 'siteId');
+        
+        if (hasIdCol && hasSiteIdCol) {
+            await db('canteen_menus').where('id', 'like', 'demo_%').orWhere('siteId', 'like', 'demo_%').del();
+        } else if (hasSiteIdCol) {
+            await db('canteen_menus').where('siteId', 'like', 'demo_%').del();
+        } else if (hasIdCol) {
+            await db('canteen_menus').where('id', 'like', 'demo_%').del();
+        } else {
+            await db('canteen_menus').where('week_id', 'like', 'demo_%').del();
+        }
+    }
+
+    await db('playlists').where('id', 'like', 'demo_%').orWhere('siteId', 'like', 'demo_%').del();
+    await db('players').where('id', 'like', 'demo_%').orWhere('siteId', 'like', 'demo_%').del();
+    await db('users').where('email', 'like', '%@kikoo.ovh').orWhere('siteId', 'like', 'demo_%').del();
+    await db('sites').where('id', 'like', 'demo_%').del();
+}
+
+// POST /api/admin/system/demo-data/generate - Générer le jeu de données conséquent (5 Collèges)
+app.post('/api/admin/system/demo-data/generate', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        await deleteDemoData();
+
+        const defaultPasswordHash = await bcrypt.hash('123456', saltRounds);
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        const currentIsoWeek = getIsoWeekString(new Date());
+        const dNext = new Date();
+        dNext.setDate(dNext.getDate() + 7);
+        const nextIsoWeek = getIsoWeekString(dNext);
+
+        const colleges = [
+            {
+                id: 'demo_stexupery',
+                name: 'Collège Antoine de Saint-Exupéry',
+                desc: 'Établissement secondaire connecté - Site Principal',
+                users: [
+                    { username: 'chef.stexupery', role: 'cook', email: 'chef.stexupery@kikoo.ovh' },
+                    { username: 'secretaire.stexupery', role: 'secretary', email: 'secretaire.stexupery@kikoo.ovh' },
+                    { username: 'auteur.stexupery', role: 'author', email: 'auteur.stexupery@kikoo.ovh' }
+                ],
+                rooms: [
+                    { id: 'demo_room_stex_1', name: 'Salle Le Petit Prince', capacity: 15, location: '1er Étage - Aile Ouest', color: '#3498db' },
+                    { id: 'demo_room_stex_2', name: 'Amphithéâtre Aéropostale', capacity: 50, location: 'RDC Bâtiment A', color: '#9b59b6' }
+                ],
+                meetings: [
+                    { id: 'demo_mtg_stex_1', title: 'Conseil de Classe 3ème A', roomId: 'demo_room_stex_1', startTime: `${todayStr}T09:00:00`, endTime: `${todayStr}T10:30:00`, organizer: 'M. le Principal', notes: 'Présence obligatoire des délégués' },
+                    { id: 'demo_mtg_stex_2', title: 'Commission Cantine & Éco-Délégués', roomId: 'demo_room_stex_2', startTime: `${todayStr}T14:00:00`, endTime: `${todayStr}T15:30:00`, organizer: 'Chef Cuisinier', notes: 'Dégustation des nouveaux menus bio' }
+                ],
+                canteenCurrent: {
+                    Lundi: { starter: 'Salade niçoise au thon', main: 'Sauté de dinde sauce crème & riz basmati', dessert: 'Tarte fine aux pommes' },
+                    Mardi: { starter: 'Velouté de potiron maison', main: 'Filet de colin sauce oseille & brunoise de légumes', dessert: 'Éclair au chocolat' },
+                    Mercredi: { starter: 'Carottes râpées bio & graines de courge', main: 'Lasagnes végétariennes aux épinards', dessert: 'Salade de fruits frais de saison' },
+                    Jeudi: { starter: 'Taboulé oriental à la menthe', main: 'Poulet rôti de la ferme & frites croustillantes', dessert: 'Mousse au chocolat noir' },
+                    Vendredi: { starter: 'Salade verte & croûtons à l\'ail', main: 'Pavé de saumon grillé & purée maison', dessert: 'Yaourt bio de producteurs locaux' }
+                },
+                canteenNext: {
+                    Lundi: { starter: 'Concombres à la crème d\'aneth', main: 'Steak haché bouchère & coquillettes', dessert: 'Compote de pommes cannelle' },
+                    Mardi: { starter: 'Salade piémontaise', main: 'Rôti de veau au jus & haricots verts', dessert: 'Flan pâtissier maison' },
+                    Mercredi: { starter: 'Betteraves rouges en vinaigrette', main: 'Omelette aux fines herbes & salade', dessert: 'Fruit de saison' },
+                    Jeudi: { starter: 'Céleri rémoulade', main: 'Sauté de porc aux pruneaux & riz', dessert: 'Tartelette aux fraises' },
+                    Vendredi: { starter: 'Quiche aux poireaux', main: 'Dos de cabillaud au citron & riz pilaf', dessert: 'Fromage blanc & coulis' }
+                }
+            },
+            {
+                id: 'demo_curie',
+                name: 'Collège Marie Curie',
+                desc: 'Pôle scientifique & innovation numérique',
+                users: [
+                    { username: 'chef.curie', role: 'cook', email: 'chef.curie@kikoo.ovh' },
+                    { username: 'secretaire.curie', role: 'secretary', email: 'secretaire.curie@kikoo.ovh' },
+                    { username: 'prof.curie', role: 'author', email: 'prof.curie@kikoo.ovh' }
+                ],
+                rooms: [
+                    { id: 'demo_room_curie_1', name: 'Laboratoire Radium', capacity: 12, location: '2ème Étage - Bâtiment Sciences', color: '#2ecc71' },
+                    { id: 'demo_room_curie_2', name: 'Salle Nobel', capacity: 20, location: '1er Étage - Centre de Documentation', color: '#e67e22' }
+                ],
+                meetings: [
+                    { id: 'demo_mtg_curie_1', title: 'Atelier Robotique & Concours Sciences', roomId: 'demo_room_curie_1', startTime: `${todayStr}T10:00:00`, endTime: `${todayStr}T12:00:00`, organizer: 'Mme Curie (Prof. Physique)', notes: 'Démonstration des robots Arduino' },
+                    { id: 'demo_mtg_curie_2', title: 'Réunion Parents-Enseignants 4ème', roomId: 'demo_room_curie_2', startTime: `${todayStr}T16:30:00`, endTime: `${todayStr}T18:30:00`, organizer: 'Vie Scolaire', notes: 'Accueil café en salle Nobel' }
+                ],
+                canteenCurrent: {
+                    Lundi: { starter: 'Salade de tomates & mozzarella', main: 'Escalope de dinde panée & haricots beurre', dessert: 'Brownie aux noix' },
+                    Mardi: { starter: 'Soupe de poireaux & pommes de terre', main: 'Bourguignon de bœuf & purée', dessert: 'Crème dessert vanille' },
+                    Mercredi: { starter: 'Macedoine de légumes', main: 'Raviolis au fromage & salade', dessert: 'Crumble aux poires' },
+                    Jeudi: { starter: 'Salade cauchoise', main: 'Rôti de porc au thym & lentilles', dessert: 'Gâteau au citron' },
+                    Vendredi: { starter: 'Friand au fromage', main: 'Filet de lieu noir & riz saucée provençale', dessert: 'Ile flottante' }
+                },
+                canteenNext: {
+                    Lundi: { starter: 'Radis au beurre', main: 'Nuggets de poulet & frites', dessert: 'Yaourt nature bio' },
+                    Mardi: { starter: 'Salade de gésiers', main: 'Sauté de dinde aux champignons & pâtes', dessert: 'Tarte aux prunes' },
+                    Mercredi: { starter: 'Potage Saint-Germain', main: 'Tartiflette au reblochon & salade', dessert: 'Salade d\'oranges' },
+                    Jeudi: { starter: 'Avocat vinaigrette', main: 'Couscous royal aux légumes', dessert: 'Semoule au lait' },
+                    Vendredi: { starter: 'Salade niçoise', main: 'Soles meunières & pommes vapeur', dessert: 'Tarte aux abricots' }
+                }
+            },
+            {
+                id: 'demo_jverne',
+                name: 'Collège Jules Verne',
+                desc: 'Établissement international et découvertes',
+                users: [
+                    { username: 'chef.jverne', role: 'cook', email: 'chef.jverne@kikoo.ovh' },
+                    { username: 'secretaire.jverne', role: 'secretary', email: 'secretaire.jverne@kikoo.ovh' }
+                ],
+                rooms: [
+                    { id: 'demo_room_jverne_1', name: 'Salle Nautilus', capacity: 18, location: 'RDC Aile Océan', color: '#1abc9c' },
+                    { id: 'demo_room_jverne_2', name: 'Salle Tour du Monde', capacity: 25, location: '2ème Étage', color: '#e74c3c' }
+                ],
+                meetings: [
+                    { id: 'demo_mtg_jverne_1', title: 'Organisation Voyage Linguistique Angleterre', roomId: 'demo_room_jverne_2', startTime: `${todayStr}T11:00:00`, endTime: `${todayStr}T12:30:00`, organizer: 'Prof. d\'Anglais', notes: 'Distribution des passeports et consignes' }
+                ],
+                canteenCurrent: {
+                    Lundi: { starter: 'Coleslaw maison', main: 'Fish & Chips à l\'anglaise & petits pois', dessert: 'Muffin aux myrtilles' },
+                    Mardi: { starter: 'Gazpacho andalou', main: 'Paëlla valencienne au poulet & fruits de mer', dessert: 'Churros au sucre' },
+                    Mercredi: { starter: 'Salade grecque (Feta & Olives)', main: 'Moussaka de bœuf & salade', dessert: 'Baklava aux amandes' },
+                    Jeudi: { starter: 'Antipasti de légumes grillés', main: 'Pizza reine artisanale & salade verte', dessert: 'Tiramisu traditionnel' },
+                    Vendredi: { starter: 'Salade asiatique aux germes de soja', main: 'Wok de nouilles & crevettes sautées', dessert: 'Perles de coco' }
+                },
+                canteenNext: {
+                    Lundi: { starter: 'Salade strasbourgeoise', main: 'Choucroute garnie', dessert: 'Kugelhopf' },
+                    Mardi: { starter: 'Bruschetta aux tomates', main: 'Risotto aux champignons', dessert: 'Panna cotta aux fruits rouges' },
+                    Mercredi: { starter: 'Salade mexicaine', main: 'Chili con carne & riz', dessert: 'Donut glacé' },
+                    Jeudi: { starter: 'Soupe à l\'oignon', main: 'Blanquette de veau & riz', dessert: 'Tarte Tatin' },
+                    Vendredi: { starter: 'Salade scandinave', main: 'Pavé de saumon aneth & vapeur', dessert: 'Brioche perdue' }
+                }
+            },
+            {
+                id: 'demo_jmoulin',
+                name: 'Collège Jean Moulin',
+                desc: 'Établissement engagé & Citoyenneté',
+                users: [
+                    { username: 'chef.jmoulin', role: 'cook', email: 'chef.jmoulin@kikoo.ovh' },
+                    { username: 'secretaire.jmoulin', role: 'secretary', email: 'secretaire.jmoulin@kikoo.ovh' }
+                ],
+                rooms: [
+                    { id: 'demo_room_jmoulin_1', name: 'Salle Résistance', capacity: 16, location: '1er Étage Bâtiment Historique', color: '#34495e' },
+                    { id: 'demo_room_jmoulin_2', name: 'Salle Clostermann', capacity: 40, location: 'RDC Grande Salle', color: '#f39c12' }
+                ],
+                meetings: [
+                    { id: 'demo_mtg_jmoulin_1', title: 'Comité d\'Éducation à la Santé et la Citoyenneté (CESC)', roomId: 'demo_room_jmoulin_1', startTime: `${todayStr}T14:00:00`, endTime: `${todayStr}T16:00:00`, organizer: 'Infirmière Scolaire', notes: 'Bilan des actions de prévention' }
+                ],
+                canteenCurrent: {
+                    Lundi: { starter: 'Salade maraîchère bio', main: 'Sauté de dinde aux poivrons & blé', dessert: 'Fromage de chèvre & pomme' },
+                    Mardi: { starter: 'Soupe de poireaux local', main: 'Hachis parmentier maison & salade', dessert: 'Compote poire-vanille' },
+                    Mercredi: { starter: 'Betteraves bio râpées', main: 'Galettes de sarrazin complète (Œuf/Fromage)', dessert: 'Crêpe au sucre' },
+                    Jeudi: { starter: 'Salade de lentilles du Puy', main: 'Saucisse de Toulouse & purée maison', dessert: 'Tarte aux poires' },
+                    Vendredi: { starter: 'Terrine de poisson faite maison', main: 'Filet de merlu & riz de Camargue', dessert: 'Yaourt nature fermier' }
+                },
+                canteenNext: {
+                    Lundi: { starter: 'Salade verte bio', main: 'Rôti de dinde & pommes rissolées', dessert: 'Poire au sirop' },
+                    Mardi: { starter: 'Velouté de carottes', main: 'Sauté de bœuf & coquillettes', dessert: 'Crème chocolat' },
+                    Mercredi: { starter: 'Radis & beurre bio', main: 'Quiche lorraine & salade', dessert: 'Fruit frais' },
+                    Jeudi: { starter: 'Salade composée', main: 'Poulet rôti & haricots vert', dessert: 'Flan aux œufs' },
+                    Vendredi: { starter: 'Salade de thon', main: 'Dos de cabillaud & riz', dessert: 'Gâteau basque' }
+                }
+            },
+            {
+                id: 'demo_peluard',
+                name: 'Collège Paul Éluard',
+                desc: 'Établissement des Arts, Culture et Poésie',
+                users: [
+                    { username: 'chef.peluard', role: 'cook', email: 'chef.peluard@kikoo.ovh' },
+                    { username: 'secretaire.peluard', role: 'secretary', email: 'secretaire.peluard@kikoo.ovh' }
+                ],
+                rooms: [
+                    { id: 'demo_room_peluard_1', name: 'Salle Liberté', capacity: 14, location: '1er Étage - Aile Arts', color: '#d35400' },
+                    { id: 'demo_room_peluard_2', name: 'Salle Poésie', capacity: 10, location: '2ème Étage', color: '#8e44ad' }
+                ],
+                meetings: [
+                    { id: 'demo_mtg_peluard_1', title: 'Préparation du Printemps des Poètes', roomId: 'demo_room_peluard_1', startTime: `${todayStr}T15:00:00`, endTime: `${todayStr}T17:00:00`, organizer: 'Prof. de Lettres & Arts', notes: 'Exposition des œuvres des 5ème' }
+                ],
+                canteenCurrent: {
+                    Lundi: { starter: 'Salade de jeunes pousses & noix', main: 'Filet de poulet rôti & gratin dauphinois', dessert: 'Tartelette aux framboises' },
+                    Mardi: { starter: 'Potage de potimarron aux châtaignes', main: 'Rôti de porc aux pommes & purée', dessert: 'Fondant au chocolat' },
+                    Mercredi: { starter: 'Salade d\'endives aux noix', main: 'Gnocchis au pesto & parmesan', dessert: 'Tiramisu spéculoos' },
+                    Jeudi: { starter: 'Salade niçoise', main: 'Sauté de veau marengo & riz', dessert: 'Tarte aux myrtilles' },
+                    Vendredi: { starter: 'Salade de crevettes à l\'avocat', main: 'Pavé de truite & fondue de poireaux', dessert: 'Panna cotta mangue' }
+                },
+                canteenNext: {
+                    Lundi: { starter: 'Carottes bio râpées', main: 'Sauté de dinde & pâtes', dessert: 'Pomme bio' },
+                    Mardi: { starter: 'Soupe de légumes', main: 'Steak haché & frites maison', dessert: 'Profiteroles' },
+                    Mercredi: { starter: 'Salade verte', main: 'Pizza margherita & salade', dessert: 'Compote pomme-fraise' },
+                    Jeudi: { starter: 'Salade maraîchère', main: 'Poulet rôti & petits pois', dessert: 'Tarte normande' },
+                    Vendredi: { starter: 'Salade de macaronis', main: 'Filet de colin & riz pilaf', dessert: 'Yaourt aux fruits' }
+                }
+            }
+        ];
+
+        for (const col of colleges) {
+            await db('sites').insert({ id: col.id, name: col.name, description: col.desc })
+                .onConflict('id').merge();
+
+            for (const u of col.users) {
+                await db('users').insert({
+                    username: u.username,
+                    password: defaultPasswordHash,
+                    role: u.role,
+                    email: u.email,
+                    siteId: col.id
+                }).onConflict('username').merge();
+            }
+
+            for (const r of col.rooms) {
+                await db('meeting_rooms').insert({
+                    id: r.id,
+                    name: r.name,
+                    siteId: col.id,
+                    capacity: r.capacity,
+                    location: r.location,
+                    color: r.color
+                }).onConflict('id').merge();
+            }
+
+            for (const m of col.meetings) {
+                await db('meetings').insert({
+                    id: m.id,
+                    title: m.title,
+                    roomId: m.roomId,
+                    siteId: col.id,
+                    organizer: m.organizer,
+                    startTime: m.startTime,
+                    endTime: m.endTime,
+                    notes: m.notes,
+                    status: 'confirmed',
+                    createdBy: 'secretaire'
+                }).onConflict('id').merge();
+            }
+
+            const upsertCanteenMenu = async (payload) => {
+                const uniqueWeekKey = payload.id; // Format: siteId_weekId (e.g. demo_curie_2026-30)
+                const payloadWithUniqueKey = { ...payload, week_id: uniqueWeekKey };
+
+                try {
+                    const existing = await db('canteen_menus').where({ id: payload.id }).first()
+                                 || await db('canteen_menus').where({ week_id: uniqueWeekKey }).first()
+                                 || await db('canteen_menus').where({ siteId: payload.siteId, week_id: payload.week_id }).first();
+                    if (existing) {
+                        await db('canteen_menus').where({ id: existing.id || existing.week_id || payload.id }).update(payloadWithUniqueKey);
+                    } else {
+                        await db('canteen_menus').insert(payloadWithUniqueKey);
+                    }
+                } catch (e) {
+                    await db('canteen_menus').insert({
+                        week_id: uniqueWeekKey,
+                        data: payload.data,
+                        updatedAt: payload.updatedAt
+                    });
+                }
+            };
+
+            await upsertCanteenMenu({
+                id: `${col.id}_${currentIsoWeek}`,
+                siteId: col.id,
+                week_id: currentIsoWeek,
+                data: JSON.stringify(col.canteenCurrent),
+                updatedAt: new Date()
+            });
+
+            await upsertCanteenMenu({
+                id: `${col.id}_${nextIsoWeek}`,
+                siteId: col.id,
+                week_id: nextIsoWeek,
+                data: JSON.stringify(col.canteenNext),
+                updatedAt: new Date()
+            });
+
+            const playlistId = `demo_p_${col.id}`;
+            const playlistItems = [
+                {
+                    duration: 10000,
+                    backgroundColor: '#1a252f',
+                    template: 'canteen',
+                    data: { title: `MENU CANTINE - ${col.name.toUpperCase()}`, useLiveMenu: true }
+                },
+                {
+                    duration: 10000,
+                    backgroundColor: '#2c3e50',
+                    template: 'meeting',
+                    data: { room: 'Salle Principale', useLiveMeeting: true }
+                }
+            ];
+
+            await db('playlists').insert({
+                id: playlistId,
+                name: `Playlist Démo - ${col.name}`,
+                items: JSON.stringify(playlistItems),
+                siteId: col.id,
+                createdBy: 'admin'
+            }).onConflict('id').merge();
+
+            const playerId = `demo_screen_${col.id}`;
+            await db('players').insert({
+                id: playerId,
+                name: `Écran Accueil (${col.name})`,
+                status: 'approved',
+                siteId: col.id,
+                manualPlaylistId: playlistId,
+                lastSeen: new Date(),
+                downloadStatus: '{}'
+            }).onConflict('id').merge();
+        }
+
+        console.log("✅ Jeu de données démo (5 Collèges) généré avec succès.");
+        res.json({ success: true, message: "Jeu de données démo (5 Collèges) créé avec succès !" });
+    } catch (err) {
+        console.error("Erreur génération demo data:", err);
+        res.status(500).send("Erreur lors de la génération du jeu de données : " + err.message);
+    }
+});
+
+// DELETE /api/admin/system/demo-data/clear - Supprimer exclusivement le jeu de données démo
+app.delete('/api/admin/system/demo-data/clear', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        await deleteDemoData();
+        console.log("🧹 Jeu de données démo (5 Collèges) supprimé. Données de tests intactes.");
+        res.json({ success: true, message: "Jeu de données de démonstration supprimé. Vos autres données de tests sont intactes." });
+    } catch (err) {
+        console.error("Erreur suppression demo data:", err);
+        res.status(500).send("Erreur lors de la suppression du jeu de données démo : " + err.message);
     }
 });
 

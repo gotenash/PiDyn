@@ -1302,8 +1302,8 @@
             playlistData.items = playlistData.items || [];
             
             const defaults = {
-                canteen: { title: 'Menu du Jour', starter: 'Salade', main: 'Plat principal', dessert: 'Fruits', useLiveMenu: false },
-                meeting: { room: 'Salle de Réunion', subject: 'Sujet de la réunion', status: 'Disponible' },
+                canteen: { title: 'Menu du Jour', starter: '', main: '', dessert: '', useLiveMenu: true },
+                meeting: { room: 'Toutes les Salles', subject: '', status: 'Disponible', useLiveMeeting: true },
                 video_fullscreen: { 
                     videoUrl: '', 
                     loop: false, 
@@ -1346,6 +1346,7 @@
                     { key: 'dessert', label: 'Dessert', type: 'text' }
                 ],
                 meeting: [
+                    { key: 'useLiveMeeting', label: 'Afficher les réunions du jour en direct (Auto)', type: 'checkbox' },
                     { key: 'room', label: 'Nom de la salle', type: 'text' },
                     { key: 'subject', label: 'Sujet', type: 'text' },
                     { key: 'status', label: 'Statut', type: 'select', options: ['Disponible', 'Occupée'] }
@@ -1679,20 +1680,38 @@
             
             if (item && item.template) {
                 tplLayer.style.display = 'flex';
-                tplLayer.style.padding = item.template === 'video_fullscreen' ? '0' : '20px';
+                tplLayer.style.padding = item.template === 'video_fullscreen' ? '0' : '70px 20px 20px 20px';
                 if (item.template === 'canteen') {
-                    tplLayer.innerHTML = `
-                        <div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px; padding-bottom:5px;">${item.data.title || 'MENU'}</div>
-                        <div style="font-size:16px;">
-                            <p><b>Entrée:</b> ${item.data.starter}</p>
-                            <p><b>Plat:</b> ${item.data.main}</p>
-                            <p><b>Dessert:</b> ${item.data.dessert}</p>
-                        </div>`;
+                    const isLive = item.data.useLiveMenu !== false;
+                    if (isLive) {
+                        tplLayer.innerHTML = `
+                            <div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px; padding-bottom:5px;">${item.data.title || 'MENU CANTINE'} (En direct)</div>
+                            <div style="font-size:16px;">
+                                <p style="color:#2ecc71; font-weight:bold;">🟢 Menu de la semaine (Mise à jour automatique)</p>
+                                <p><i>Le menu du jour s'affichera automatiquement sur l'écran.</i></p>
+                            </div>`;
+                    } else {
+                        tplLayer.innerHTML = `
+                            <div style="color:#3498db; font-weight:bold; font-size:24px; border-bottom:2px solid #3498db; margin-bottom:15px; padding-bottom:5px;">${item.data.title || 'MENU CANTINE'}</div>
+                            <div style="font-size:16px;">
+                                <p><b>Entrée:</b> ${item.data.starter || 'Non renseignée'}</p>
+                                <p><b>Plat:</b> ${item.data.main || 'Non renseigné'}</p>
+                                <p><b>Dessert:</b> ${item.data.dessert || 'Non renseigné'}</p>
+                            </div>`;
+                    }
                 } else if (item.template === 'meeting') {
-                    tplLayer.innerHTML = `
-                        <div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${item.data.room}</div>
-                        <div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${item.data.subject}</div>
-                        <div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${item.data.status === 'Disponible' ? '#27ae60' : '#e74c3c'}">${item.data.status}</div>`;
+                    const isLive = item.data.useLiveMeeting !== false;
+                    if (isLive) {
+                        tplLayer.innerHTML = `
+                            <div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${item.data.room || 'Toutes les Salles'}</div>
+                            <div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">📅 Planning des Réunions du Jour (En direct)</div>
+                            <div style="display:inline-block; padding:8px 25px; border-radius:20px; background:#27ae60; color:white; font-weight:bold;">🟢 Live Agenda Sync</div>`;
+                    } else {
+                        tplLayer.innerHTML = `
+                            <div style="font-size:28px; font-weight:bold; margin-bottom:10px;">${item.data.room || 'Salle de Réunion'}</div>
+                            <div style="color:#bdc3c7; font-size:18px; margin-bottom:20px;">${item.data.subject || 'Sujet de la réunion'}</div>
+                            <div style="display:inline-block; padding:8px 25px; border-radius:20px; background:${(item.data.status || 'Disponible') === 'Disponible' ? '#27ae60' : '#e74c3c'}; color:white; font-weight:bold;">${item.data.status || 'Disponible'}</div>`;
+                    }
                 } else if (item.template === 'video_fullscreen') {
                     const isMuted = item.data.muted === true;
                     let html = item.data.videoUrl 
