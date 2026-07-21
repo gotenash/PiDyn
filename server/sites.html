@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>OmniSign - Gestion Sites</title>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #2c3e50; color: #ecf0f1; margin: 20px; }
+        body { font-family: sans-serif; padding: 20px; background: #2c3e50; color: white; }
         h1, h2 { color: #3498db; }
         section { background: #34495e; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         input, select, textarea, button { padding: 10px; font-size: 14px; border-radius: 4px; border: none; }
@@ -28,12 +28,12 @@
     <script src="/assets/theme.js"></script>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>OmniSign - Gestion des Sites</h1>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
+        <h1 style="margin: 0; color: #3498db;">OmniSign - Gestion des Sites</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
-    <nav>
+    <nav style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
         <button class="secondary" onclick="window.location.href='/'">📊 Accueil</button>
         <button class="secondary" onclick="window.location.href='/ecrans'">🖥 Écrans</button>
         <button class="secondary" onclick="window.location.href='/diaporamas'">🎞 Diaporamas</button>

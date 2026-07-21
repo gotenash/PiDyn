@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "server.js",
   "dependencies": {
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.0",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
     "express": "^4.21.0",

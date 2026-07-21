@@ -66,64 +66,45 @@ OmniSign is a comprehensive digital signage solution designed to provide central
 *   **Database:** SQLite for robust data persistence
 
 ## Getting Started
-### Server Setup
-1.  **Prerequisites:** 
-    *   Ensure **Node.js** and **npm** are installed on your server.
-    *   For **PPTX Import**: Install **LibreOffice** (headless) and **pdftocairo** (often part of `poppler-utils` on Linux).
-    *   For **YouTube Import**: Place the **yt-dlp** executable in the `server/` directory or make it globally available on your path.
-    *   For **Bypassing YouTube bot blocks/HTTP 429**: Install a browser extension (e.g. "Get cookies.txt LOCALLY") to export your browser's YouTube session cookies and import `cookies.txt` into the server's **System** settings.
-2.  **Option A: Standard Installation:**
-   ```bash
-   git clone https://github.com/gotenash/PiDyn.git
-   cd PiDyn/client # Assuming server.js is in the client directory for this context
-   ```
-3.  **Install dependencies:**
-   ```bash
-   npm install
-   ```
-4.  **Start the server:**
-   ```bash
-   node server.js
-   ```
-   The server will start on port `3000` (or `process.env.PORT`).
+### Easy Server Installation (Windows)
+Double-click **`Installer_OmniSign.bat`** at the root of the repository.
+The guided wizard will:
+1. Check for **Node.js** and automatically install or upgrade it to the latest LTS version using `winget`.
+2. Install all required `npm` dependencies.
+3. Create an **"OmniSign Serveur"** shortcut on your Desktop.
+4. Prompt to launch the server immediately and open your web browser at `http://localhost:3000`.
 
-5.  **Option B: Standalone Executable (Windows/Linux):**
-    Run the `build_exe.bat` script to create a standalone executable in the `dist/` folder. This version includes Node.js and doesn't require pre-installation on the target machine.
+To start the server manually at any time, double-click `Lancer_OmniSign.bat` or the Desktop shortcut.
 
-### Raspberry Pi Client Setup
-1.  **Prepare SD Card:** Flash Raspberry Pi OS (Lite or Desktop, depending on your needs) onto an SD card.
-2.  **Create `setup.txt`:**
-    *   For **Bullseye** and older: Create the file in the `/boot/` partition.
-    *   For **Bookworm/Trixie**: Create the file in the `/boot/firmware/` partition.
-    
-    Add the following content:
-   ```
-   DEVICE_ID=your-unique-device-id
-   SERVER_URL=http://your-server-ip:3000
-   API_KEY=ma_cle_secrete_123 # This should match the API_KEY in server.js
-   ```
-3.  **Copy Client Files:** Copy the entire `pidyn_client` directory (containing `sync-engine.js`, `player.html`, `media/`, etc.) to the `/boot/` partition of your SD card.
-4.  **Run Setup Script:** Boot your Raspberry Pi. The `setup_pi.sh` script is designed to be run once to configure the system.
-   ```bash
-   sudo /boot/setup_pi.sh
-   ```
-    The script will update the system, install Node.js, Chromium, X11, copy application files, install Node.js dependencies, and set up systemd services for automatic startup. It will then reboot the system.
+### Guided Client Installers (Windows, Raspberry Pi, Linux Desktop)
 
-### General Linux Client Setup (Linux Mint, Ubuntu, Debian)
-1. **Prepare configuration:**
-   Create a `setup.txt` file in your client installation directory (e.g. `$HOME/pidyn/setup.txt`) with the following content:
-   ```
-   DEVICE_ID=your-unique-device-id
-   SERVER_URL=http://your-server-ip:3000
-   API_KEY=ma_cle_secrete_123
-   ```
-2. **Run Installer:**
-   Navigate to the `client_linux/` folder on the target machine and execute the Linux installer script (do NOT run as root/sudo directly):
-   ```bash
-   chmod +x setup_linux.sh
-   ./setup_linux.sh
-   ```
-   This will install dependencies (Node.js, npm, scrot, grim, unclutter, curl, alsa-utils), download packages, and register startup entries inside the desktop session's Autostart folder (`~/.config/autostart/`). On next user login, both the sync engine and the player will start automatically.
+All 3 client platforms feature an interactive installation wizard that prompts for:
+- **Server Address**: Local network IP (e.g., `192.168.1.50:3000`) or Remote Domain URL (e.g., `http://omnisign.local:3000`).
+- **Screen API Key**: Generated from the OmniSign server admin panel.
+- **Device ID**: Unique identifier for the display unit.
+
+#### 1. Windows Client (`client_win/`)
+Run **`Installer_Client_Windows.bat`** inside `client_win/`.
+- Interactively configures server URL, API key, and Device ID.
+- Automatically generates `setup.txt` and `omnisign-start.bat`.
+- Installs Node.js dependencies and optionally registers the player in Windows Startup (`shell:startup`).
+
+#### 2. Raspberry Pi Client (`client_pi/`)
+Run **`installer_pi.sh`** inside `client_pi/`:
+```bash
+cd client_pi
+bash installer_pi.sh
+```
+- Interactive CLI wizard writes setup variables to `/boot/setup.txt` (or `/boot/firmware/setup.txt`).
+- Automated system setup (Node.js, Chromium, X11, Openbox, Kiosk autostart, systemd service).
+
+#### 3. Linux Desktop Client (`client_linux/`)
+Run **`installer_linux.sh`** inside `client_linux/`:
+```bash
+cd client_linux
+bash installer_linux.sh
+```
+- Interactive CLI wizard configures `setup.txt`, installs dependencies, and registers autostart entries inside `~/.config/autostart/`.
 
 ## Usage
 1.  **Access Admin Panel:** Open a web browser and navigate to `http://your-server-ip:3000`.
@@ -204,64 +185,45 @@ OmniSign est une solution complète d'affichage dynamique conçue pour offrir un
 *   **Base de Données:** SQLite pour une persistance robuste des données
 
 ## Démarrage Rapide
-### Configuration du Serveur
-1.  **Prérequis :** 
-    *   Assurez-vous que **Node.js** et **npm** sont installés sur votre serveur.
-    *   Pour **l'importation PPTX** : Installez **LibreOffice** (mode headless/sans tête) et **pdftocairo** (généralement inclus dans `poppler-utils` sous Linux).
-    *   Pour **l'importation YouTube** : Placez l'exécutable **yt-dlp** dans le dossier `server/` ou installez-le globalement et rendez-le disponible dans votre PATH.
-    *   Pour **le contournement des limites/robots YouTube** : Installez une extension (ex: "Get cookies.txt LOCALLY") pour exporter les cookies YouTube de votre navigateur et téléversez le fichier `cookies.txt` dans la page **Système** de l'administration.
-2.  **Option A : Installation Standard :**
-   ```bash
-   git clone https://github.com/gotenash/PiDyn.git
-   cd PiDyn/client # En supposant que server.js se trouve dans le répertoire client pour ce contexte
-   ```
-3.  **Installer les dépendances:**
-   ```bash
-   npm install
-   ```
-4.  **Démarrer le serveur:**
-   ```bash
-   node server.js
-   ```
-   Le serveur démarrera sur le port `3000` (ou `process.env.PORT`).
+### Installation Simplifiée du Serveur (Windows)
+Double-cliquez sur **`Installer_OmniSign.bat`** à la racine du projet.
+L'assistant guidé va :
+1. Vérifier la présence de **Node.js** et l'installer ou le mettre à jour vers la dernière version LTS via `winget`.
+2. Installer automatiquement toutes les dépendances `npm`.
+3. Créer un raccourci **« OmniSign Serveur »** sur votre Bureau.
+4. Démarrer le serveur et ouvrir votre navigateur à l'adresse `http://localhost:3000`.
 
-5.  **Option B : Exécutable autonome (Windows/Linux) :**
-    Lancez le script `build_exe.bat` pour créer un exécutable autonome dans le dossier `dist/`. Cette version embarque Node.js et ne nécessite aucune installation préalable sur la machine cible.
+Pour relancer le serveur ultérieurement, double-cliquez sur `Lancer_OmniSign.bat` ou sur le raccourci du Bureau.
 
-### Configuration du Client Raspberry Pi
-1.  **Préparer la Carte SD:** Flashez Raspberry Pi OS (Lite ou Desktop, selon vos besoins) sur une carte SD.
-2.  **Créer `setup.txt` :**
-    *   Pour **Bullseye** et versions antérieures : Créez le fichier dans la partition `/boot/`.
-    *   Pour **Bookworm/Trixie** : Créez le fichier dans la partition `/boot/firmware/`.
-    
-    Ajoutez le contenu suivant :
-   ```
-   DEVICE_ID=votre-identifiant-unique-d-appareil
-   SERVER_URL=http://votre-ip-serveur:3000
-   API_KEY=ma_cle_secrete_123 # Cela doit correspondre à l'API_KEY dans server.js
-   ```
-3.  **Copier les Fichiers Client:** Copiez l'intégralité du répertoire `pidyn_client` (contenant `sync-engine.js`, `player.html`, `media/`, etc.) sur la partition `/boot/` de votre carte SD.
-4.  **Exécuter le Script d'Installation:** Démarrez votre Raspberry Pi. Le script `setup_pi.sh` est conçu pour être exécuté une seule fois afin de configurer le système.
-   ```bash
-   sudo /boot/setup_pi.sh
-   ```
-    Le script mettra à jour le système, installera Node.js, Chromium, X11, copiera les fichiers de l'application, installera les dépendances Node.js et configurera les services systemd pour un démarrage automatique. Il redémarrera ensuite le système.
+### Installateurs Guidés pour les Clients (Windows, Raspberry Pi, Linux Desktop)
 
-### Configuration du Client Linux classique (Linux Mint, Ubuntu, Debian)
-1. **Préparer la configuration :**
-   Créez un fichier `setup.txt` dans le dossier d'installation du client (ex: `$HOME/pidyn/setup.txt`) avec le contenu suivant :
-   ```
-   DEVICE_ID=votre-identifiant-unique
-   SERVER_URL=http://votre-ip-serveur:3000
-   API_KEY=ma_cle_secrete_123
-   ```
-2. **Lancer l'installateur :**
-   Ouvrez un terminal dans le répertoire `client_linux/` et lancez le script (ne PAS l'exécuter avec sudo directement) :
-   ```bash
-   chmod +x setup_linux.sh
-   ./setup_linux.sh
-   ```
-   Ce script installe les dépendances (Node.js, npm, scrot, grim, unclutter, curl, alsa-utils), télécharge les paquets nécessaires et ajoute les deux services d'affichage au démarrage automatique de votre environnement graphique (`~/.config/autostart/`). Les applications démarreront automatiquement à l'ouverture de votre session.
+Les 3 types de clients proposent un assistant interactif qui vous demande :
+- **L'adresse du serveur** : IP locale (ex: `192.168.1.50:3000`) ou Nom de domaine (ex: `http://omnisign.local:3000`).
+- **La clé API de l'écran** : Générée depuis le panneau d'administration du serveur.
+- **L'identifiant de l'écran (Device ID)** : Nom unique de l'afficheur.
+
+#### 1. Client Windows (`client_win/`)
+Exécutez **`Installer_Client_Windows.bat`** dans le dossier `client_win/`.
+- Configure interactivement l'IP/domaine du serveur, la clé API et l'ID de l'écran.
+- Génère automatiquement `setup.txt` et `omnisign-start.bat`.
+- Installe les dépendances et ajoute l'application au démarrage de Windows (`shell:startup`).
+
+#### 2. Client Raspberry Pi (`client_pi/`)
+Exécutez **`installer_pi.sh`** dans le dossier `client_pi/` :
+```bash
+cd client_pi
+bash installer_pi.sh
+```
+- Assistant guidé inscrivant la configuration dans `/boot/setup.txt` (ou `/boot/firmware/setup.txt`).
+- Installation système automatique (Node.js, Chromium, X11, Openbox, Kiosk autostart, service systemd).
+
+#### 3. Client Linux Desktop (`client_linux/`)
+Exécutez **`installer_linux.sh`** dans le dossier `client_linux/` :
+```bash
+cd client_linux
+bash installer_linux.sh
+```
+- Assistant guidé configurant `setup.txt`, installant les dépendances et inscrivant l'application dans le démarrage de session (`~/.config/autostart/`).
 
 ## Utilisation
 1.  **Accéder au Panneau d'Administration:** Ouvrez un navigateur web et accédez à `http://votre-ip-serveur:3000`.

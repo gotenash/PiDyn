@@ -162,8 +162,8 @@
 <body>
     <div id="screenshot-gallery" style="position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 2000; max-height: 80vh; overflow-y: auto; pointer-events: none;"></div>
 
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h1>OmniSign - Gestion des Écrans</h1>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
+        <h1 style="margin: 0; color: #3498db;">OmniSign - Gestion des Écrans</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
@@ -187,10 +187,16 @@
                 <button id="view-table-btn" onclick="setViewMode('table')" style="padding:6px 12px; font-size:13px; background:none;">📋 Tableau</button>
             </div>
         </div>
-        <div style="display:flex; gap:10px; margin-bottom:15px; align-items:center;">
+        <div style="display:flex; gap:10px; margin-bottom:15px; align-items:center; flex-wrap:wrap;">
             <label for="filter-group">Filtrer par groupe :</label>
             <select id="filter-group" onchange="filterPlayers()">
                 <option value="">Tous les groupes</option>
+            </select>
+            <label for="filter-status">Statut :</label>
+            <select id="filter-status" onchange="filterPlayers()">
+                <option value="">Tous les statuts</option>
+                <option value="online">En ligne (Connectés)</option>
+                <option value="offline">Hors ligne</option>
             </select>
             <button class="secondary" onclick="load()">Actualiser</button>
         </div>
@@ -324,6 +330,11 @@
             const filterEl = document.getElementById('filter-group');
             const savedFilterValue = filterEl ? filterEl.value : '';
 
+            const statusEl = document.getElementById('filter-status');
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlStatus = urlParams.get('status') || '';
+            const savedStatusValue = statusEl ? (statusEl.value || urlStatus) : urlStatus;
+
             let html = '';
             if (viewMode === 'table') {
                 html = '<table><tr><th>Nom</th><th>ID</th><th>Groupe</th><th>Statut</th><th>Diaporama</th><th>Santé (RAM/Disque/Temp)</th><th>WiFi</th><th>Volume</th><th>Dernière vue</th><th>Action</th></tr>';
@@ -344,7 +355,7 @@
                         healthText = `<span style="color:${ramColor}; font-weight:bold;">RAM: ${p.freeMem}/${p.totalMem}MB</span>${tempText}${diskText}`;
                     }
 
-                    html += `<tr>
+                    html += `<tr data-status="${isOnline ? 'online' : 'offline'}" data-group-id="${p.groupId || ''}">
                         <td><span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>${p.name}</td>
                         <td style="font-family:monospace; font-size:11px;">${id}</td>
                         <td>
@@ -446,7 +457,7 @@
                     }
 
                     html += `
-                    <div class="player-card" data-id="${id}" data-group-id="${p.groupId || ''}">
+                    <div class="player-card" data-id="${id}" data-group-id="${p.groupId || ''}" data-status="${isOnline ? 'online' : 'offline'}">
                         <div class="player-card-header">
                             <div class="player-card-title">
                                 <span class="status-dot ${isOnline ? 'online' : 'offline'}"></span>
@@ -547,8 +558,11 @@
 
             if (filterEl) {
                 filterEl.value = savedFilterValue;
-                filterPlayers();
             }
+            if (statusEl) {
+                statusEl.value = savedStatusValue;
+            }
+            filterPlayers();
 
             document.getElementById('assign-playlist-select').innerHTML = 
                 Object.keys(playlists).map(id => {
@@ -682,20 +696,24 @@
         async function deleteAlert(id) { await fetch(`/api/admin/alerts/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }); loadAlerts(); }
 
         function filterPlayers() {
-            const gid = document.getElementById('filter-group').value;
+            const gid = document.getElementById('filter-group') ? document.getElementById('filter-group').value : '';
+            const status = document.getElementById('filter-status') ? document.getElementById('filter-status').value : '';
             if (viewMode === 'table') {
                 document.querySelectorAll('#players-list table tr').forEach((row, i) => {
                     if (i === 0) return;
-                    const selectEl = row.querySelector('select');
-                    if (selectEl) {
-                        const pgid = selectEl.value;
-                        row.style.display = (gid === '' || pgid === gid) ? '' : 'none';
-                    }
+                    const pgid = row.dataset.groupId || '';
+                    const pstatus = row.dataset.status || '';
+                    const matchGroup = (gid === '' || pgid === gid);
+                    const matchStatus = (status === '' || pstatus === status);
+                    row.style.display = (matchGroup && matchStatus) ? '' : 'none';
                 });
             } else {
                 document.querySelectorAll('#players-list .player-card').forEach((card) => {
                     const pgid = card.dataset.groupId || '';
-                    card.style.display = (gid === '' || pgid === gid) ? '' : 'none';
+                    const pstatus = card.dataset.status || '';
+                    const matchGroup = (gid === '' || pgid === gid);
+                    const matchStatus = (status === '' || pstatus === status);
+                    card.style.display = (matchGroup && matchStatus) ? '' : 'none';
                 });
             }
         }

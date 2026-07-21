@@ -42,9 +42,26 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('🔥 [CRASH ÉVITÉ] Promesse rejetée non gérée :', reason);
 });
 
-const SERVER_URL = (process.env.PIDYN_SERVER_URL && process.env.PIDYN_SERVER_URL !== "undefined") ? process.env.PIDYN_SERVER_URL : 'http://localhost:3000';
-const API_KEY = (process.env.PIDYN_API_KEY && process.env.PIDYN_API_KEY !== "undefined") ? process.env.PIDYN_API_KEY : 'ma_cle_secrete_123';
-const DEVICE_ID = (process.env.PIDYN_DEVICE_ID && process.env.PIDYN_DEVICE_ID !== "undefined") ? process.env.PIDYN_DEVICE_ID : 'pc-stick-device';
+// Lecture du fichier setup.txt s'il existe
+let fileConfig = {};
+const setupTxtPath = path.join(__dirname, 'setup.txt');
+if (fs.existsSync(setupTxtPath)) {
+    try {
+        const content = fs.readFileSync(setupTxtPath, 'utf8');
+        content.split(/\r?\n/).forEach(line => {
+            const parts = line.split('=');
+            if (parts.length >= 2) {
+                const key = parts[0].trim();
+                const val = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
+                fileConfig[key] = val;
+            }
+        });
+    } catch (e) {}
+}
+
+const SERVER_URL = (process.env.PIDYN_SERVER_URL && process.env.PIDYN_SERVER_URL !== "undefined") ? process.env.PIDYN_SERVER_URL : (fileConfig.SERVER_URL || fileConfig.PIDYN_SERVER_URL || 'http://localhost:3000');
+const API_KEY = (process.env.PIDYN_API_KEY && process.env.PIDYN_API_KEY !== "undefined") ? process.env.PIDYN_API_KEY : (fileConfig.API_KEY || fileConfig.PIDYN_API_KEY || 'ma_cle_secrete_123');
+const DEVICE_ID = (process.env.PIDYN_DEVICE_ID && process.env.PIDYN_DEVICE_ID !== "undefined") ? process.env.PIDYN_DEVICE_ID : (fileConfig.DEVICE_ID || fileConfig.PIDYN_DEVICE_ID || 'pc-stick-device');
 
 const LOCAL_MEDIA_DIR = path.join(__dirname, 'media');
 const LOCAL_MANIFEST = path.join(__dirname, 'playlist.json');

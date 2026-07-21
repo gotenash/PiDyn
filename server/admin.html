@@ -39,7 +39,7 @@
     </div>
  
     <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
-        <h1>OmniSign - Statistiques de Diffusion</h1>
+        <h1 style="margin: 0; color: #3498db;">OmniSign - Statistiques de Diffusion</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
@@ -75,11 +75,11 @@
             </div>
         </div>
         <div class="stats-grid">
-            <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/ecrans'">
+            <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/ecrans?status=online'">
                 <h3>Écrans en ligne</h3>
                 <p id="online-screens-count" style="color: #2ecc71;">0</p>
             </div>
-            <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/ecrans'">
+            <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/ecrans?status=offline'">
                 <h3>Écrans hors ligne</h3>
                 <p id="offline-screens-count" style="color: #e74c3c;">0</p>
             </div>

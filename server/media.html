@@ -103,7 +103,15 @@
             justify-content: center;
             position: relative;
         }
-        .lightbox-content img, .lightbox-content video {
+        .lightbox-content img {
+            width: 70vw;
+            max-width: 100%;
+            max-height: 70vh;
+            object-fit: contain;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border-radius: 4px;
+        }
+        .lightbox-content video {
             max-width: 100%;
             max-height: 70vh;
             object-fit: contain;
@@ -147,8 +155,8 @@
     <script src="/assets/theme.js"></script>
 </head>
 <body>
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px 20px; background: #1a252f;">
-        <h1 style="color: #3498db; margin: 0;">OmniSign - Médiathèque</h1>
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px 20px; background: #1a252f; border-bottom: 2px solid #3498db;">
+        <h1 style="margin: 0; color: #3498db;">OmniSign - Médiathèque</h1>
         <button class="secondary" onclick="logout()">Déconnexion</button>
     </header>
 
@@ -429,7 +437,13 @@
             const sortBy = document.getElementById('sort-by').value;
             const search = document.getElementById('search-media').value.toLowerCase().trim();
 
-            if (type) filtered = filtered.filter(item => item.type === type);
+            if (type) {
+                if (type === 'image') {
+                    filtered = filtered.filter(item => item.type === 'image' || item.type === 'svg' || (item.filename || '').toLowerCase().endsWith('.svg'));
+                } else {
+                    filtered = filtered.filter(item => item.type === type);
+                }
+            }
             if (user) filtered = filtered.filter(item => item.uploadedBy === user);
 
             if (currentFolderId !== null) {
@@ -1053,9 +1067,12 @@
             caption.innerText = item.filename;
 
             const authenticatedUrl = item.url + PREVIEW_AUTH;
+            const ext = (item.filename || '').split('.').pop().toLowerCase();
 
-            if (item.type === 'image' || item.type === 'svg') {
-                container.innerHTML = `<img src="${authenticatedUrl}" alt="${item.filename}">`;
+            if (item.type === 'image' || item.type === 'svg' || ext === 'svg') {
+                const isSvg = item.type === 'svg' || ext === 'svg';
+                const style = isSvg ? 'width: 70vw; height: 65vh; max-width: 100%; object-fit: contain;' : '';
+                container.innerHTML = `<img src="${authenticatedUrl}" alt="${item.filename}" style="${style}">`;
             } else if (item.type === 'video') {
                 container.innerHTML = `<video src="${authenticatedUrl}" controls autoplay></video>`;
             } else if (item.type === 'audio') {
