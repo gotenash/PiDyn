@@ -1,0 +1,14 @@
+node_modules
+server/node_modules
+server/pidyn.sqlite
+server/pidyn.sqlite-journal
+server/public/media/*
+!server/public/media/.gitkeep
+server/app/
+server/bin/
+.git
+.github
+*.bat
+*.sh
+*.md
+docker-compose.yml

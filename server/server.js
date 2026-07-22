@@ -65,8 +65,8 @@ let OFFLINE_ALERT_DELAY = 15;
 let SHOW_OFFLINE_ALERT = true;
 let PERIODIC_SCREENSHOT_ENABLED = false;
 let PERIODIC_SCREENSHOT_INTERVAL = 5; // En minutes
-const SQLITE_DB_PATH = path.join(__dirname, 'pidyn.sqlite'); // New SQLite DB path
-const MEDIA_DIR = path.join(__dirname, 'public/media');
+const SQLITE_DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, 'pidyn.sqlite'); // New SQLite DB path
+const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, 'public/media');
 
 const resolveLocalBinary = (filename) => {
     const isWin = process.platform === 'win32';
@@ -2869,12 +2869,13 @@ app.post('/api/admin/restore', authMiddleware, checkRole(['admin']), upload.sing
         
         // 1. Extraction de la base de données (écrase l'existante)
         // Note: Sur Windows, le fichier peut être verrouillé. Le process.exit() aidera au redémarrage.
-        zip.extractEntryTo("pidyn.sqlite", __dirname, false, true);
+        const dbDir = path.dirname(SQLITE_DB_PATH);
+        zip.extractEntryTo("pidyn.sqlite", dbDir, false, true);
 
         // 2. Extraction des médias
         // Le ZIP contient un dossier "media/", on l'extrait vers le dossier parent de MEDIA_DIR
-        const publicDir = path.join(__dirname, 'public');
-        zip.extractEntryTo("media/", publicDir, true, true);
+        const mediaParentDir = path.dirname(MEDIA_DIR);
+        zip.extractEntryTo("media/", mediaParentDir, true, true);
 
         await fs.remove(req.file.path); // Nettoyage du fichier temporaire
 

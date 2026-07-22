@@ -68,7 +68,9 @@ OmniSign is a comprehensive digital signage solution designed to provide central
 *   **Database:** SQLite for robust data persistence
 
 ## Getting Started
-### Easy Server Installation (Windows)
+### Easy Server Installation (Windows & Linux)
+
+#### Windows
 Double-click **`Installer_OmniSign.bat`** at the root of the repository.
 The guided wizard will:
 1. Check for **Node.js** and automatically install or upgrade it to the latest LTS version using `winget`.
@@ -77,6 +79,33 @@ The guided wizard will:
 4. Prompt to launch the server immediately and open your web browser at `http://localhost:3000`.
 
 To start the server manually at any time, double-click `Lancer_OmniSign.bat` or the Desktop shortcut.
+
+#### Linux
+Run **`setup_server.sh`** at the root of the repository:
+```bash
+chmod +x setup_server.sh
+./setup_server.sh
+```
+The guided script will:
+1. Install system dependencies (`nodejs`, `npm`, `ffmpeg`, `poppler-utils`, `libreoffice`, `yt-dlp`).
+2. Install all required Node.js dependencies in the `server` directory.
+3. Create an **"OmniSign Serveur"** shortcut on your Desktop.
+4. Prompt to launch the server immediately.
+
+To start the server manually at any time, run `./Lancer_OmniSign.sh` or double-click the Desktop shortcut.
+
+#### Docker
+Run the server using Docker and Docker Compose:
+```bash
+docker compose up -d --build
+```
+The Docker setup:
+1. Builds a lightweight Node 20 environment.
+2. Installs all required system dependencies (LibreOffice, Poppler, FFmpeg, latest yt-dlp).
+3. Persists media uploads and the SQLite database inside a dedicated Docker volume named `omnisign-data`.
+
+Access the admin panel at `http://localhost:3000`.
+
 
 ### Guided Client Installers (Windows, Raspberry Pi, Linux Desktop)
 
@@ -189,7 +218,9 @@ OmniSign est une solution complète d'affichage dynamique conçue pour offrir un
 *   **Base de Données:** SQLite pour une persistance robuste des données
 
 ## Démarrage Rapide
-### Installation Simplifiée du Serveur (Windows)
+### Installation Simplifiée du Serveur (Windows & Linux)
+
+#### Windows
 Double-cliquez sur **`Installer_OmniSign.bat`** à la racine du projet.
 L'assistant guidé va :
 1. Vérifier la présence de **Node.js** et l'installer ou le mettre à jour vers la dernière version LTS via `winget`.
@@ -198,6 +229,33 @@ L'assistant guidé va :
 4. Démarrer le serveur et ouvrir votre navigateur à l'adresse `http://localhost:3000`.
 
 Pour relancer le serveur ultérieurement, double-cliquez sur `Lancer_OmniSign.bat` ou sur le raccourci du Bureau.
+
+#### Linux
+Exécutez **`setup_server.sh`** à la racine du projet :
+```bash
+chmod +x setup_server.sh
+./setup_server.sh
+```
+L'assistant guidé va :
+1. Installer les dépendances système (`nodejs`, `npm`, `ffmpeg`, `poppler-utils`, `libreoffice`, `yt-dlp`).
+2. Installer automatiquement toutes les dépendances `npm` dans le dossier `server/`.
+3. Créer un raccourci **« OmniSign Serveur »** sur votre Bureau.
+4. Proposer de démarrer le serveur immédiatement.
+
+Pour relancer le serveur ultérieurement, exécutez `./Lancer_OmniSign.sh` ou double-cliquez sur le raccourci du Bureau.
+
+#### Docker
+Exécutez le serveur en utilisant Docker et Docker Compose :
+```bash
+docker compose up -d --build
+```
+La configuration Docker :
+1. Construit un environnement Node 20 léger.
+2. Installe toutes les dépendances système requises (LibreOffice, Poppler, FFmpeg, dernière version de yt-dlp).
+3. Persiste la médiathèque et la base de données SQLite dans un volume Docker nommé `omnisign-data`.
+
+Accédez au panneau d'administration à l'adresse `http://localhost:3000`.
+
 
 ### Installateurs Guidés pour les Clients (Windows, Raspberry Pi, Linux Desktop)
 
