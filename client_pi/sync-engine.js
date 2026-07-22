@@ -43,6 +43,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const uid = os.userInfo().uid || 1000;
+const homeDir = os.homedir();
 
 // Charger setup.txt si présent pour éviter la désynchronisation du service systemd
 const BOOT_DIR = fs.existsSync('/boot/firmware') ? '/boot/firmware' : '/boot';
@@ -599,21 +600,43 @@ socket.on('request-screenshot', () => {
     const screenshotPath = '/tmp/screenshot.jpg';
     console.log(`📸 Prise d'une capture d'écran...`);
     
-    const waylandCmd = `export XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 && grim ${screenshotPath}`;
-    const x11Cmd = `export DISPLAY=:0 XAUTHORITY=/home/pi/.Xauthority && scrot ${screenshotPath}`;
+    const displayVal = process.env.DISPLAY || ':0';
+    let xauthVal = process.env.XAUTHORITY;
+    if (!xauthVal) {
+        const gdmXauth = `/run/user/${uid}/gdm/Xauthority`;
+        if (fs.existsSync(gdmXauth)) {
+            xauthVal = gdmXauth;
+        } else {
+            xauthVal = `${homeDir}/.Xauthority`;
+        }
+    }
+    const runtimeDirVal = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+    const waylandDisplayVal = process.env.WAYLAND_DISPLAY || 'wayland-0';
+
+    const waylandCmd = `export XDG_RUNTIME_DIR=${runtimeDirVal} WAYLAND_DISPLAY=${waylandDisplayVal} && grim ${screenshotPath}`;
+    const gnomeCmd = `export DISPLAY=${displayVal} XAUTHORITY=${xauthVal} && gnome-screenshot -f ${screenshotPath}`;
+    const scrotCmd = `export DISPLAY=${displayVal} XAUTHORITY=${xauthVal} && scrot ${screenshotPath}`;
     
-    exec(waylandCmd, (waylandErr, stdout, stderr) => {
+    exec(waylandCmd, (waylandErr) => {
         if (!waylandErr) {
             console.log("✅ Capture d'écran réussie via grim (Wayland).");
             sendScreenshot();
         } else {
-            console.log("ℹ️ Échec grim (Wayland), tentative de repli sur scrot (X11)...");
-            exec(x11Cmd, (x11Err, xStdout, xStderr) => {
-                if (!x11Err) {
-                    console.log("✅ Capture d'écran réussie via scrot (X11).");
+            // Repli 2 : gnome-screenshot (X11/GNOME) qui gère l'accélération matérielle
+            exec(gnomeCmd, (gnomeErr) => {
+                if (!gnomeErr) {
+                    console.log("✅ Capture d'écran réussie via gnome-screenshot (GNOME).");
                     sendScreenshot();
                 } else {
-                    console.error(`❌ Échec de la capture d'écran (grim & scrot) : ${x11Err.message}`);
+                    console.log("ℹ️ Échec gnome-screenshot, tentative de repli sur scrot (X11 générique)...");
+                    exec(scrotCmd, (scrotErr) => {
+                        if (!scrotErr) {
+                            console.log("✅ Capture d'écran réussie via scrot (X11).");
+                            sendScreenshot();
+                        } else {
+                            console.error(`❌ Échec de la capture d'écran (grim, gnome-screenshot & scrot)`);
+                        }
+                    });
                 }
             });
         }

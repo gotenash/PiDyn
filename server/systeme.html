@@ -171,6 +171,168 @@
             <button onclick="clearDemoData()" id="btn-clear-demo" class="danger" style="display: none; font-weight: bold;">🗑️ Supprimer le jeu de données démo</button>
             <span id="demo-data-status" style="font-weight: bold; margin-left: 10px;">Statut : Recherche...</span>
         </div>
+
+        <div id="demo-credentials-container" style="display: none; margin-top: 20px; background: #2c3e50; border: 1px solid #9b59b6; border-radius: 8px; padding: 15px;">
+            <h3 style="margin-top: 0; color: #9b59b6; display: flex; justify-content: space-between; align-items: center;">
+                <span>🔑 Identifiants Générés (Bac à Sable)</span>
+                <div>
+                    <button onclick="printCredentials()" style="background: #34495e; padding: 4px 8px; font-size: 12px; margin-right: 5px;">🖨️ Imprimer</button>
+                    <button onclick="copyCredentialsText()" style="background: #34495e; padding: 4px 8px; font-size: 12px;">📋 Copier tout</button>
+                </div>
+            </h3>
+            <p style="font-size: 13px; color: #bdc3c7; margin-bottom: 15px;">
+                Voici les comptes générés aléatoirement pour les 5 collèges. Notez-les bien pour vos démonstrations !
+            </p>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid #34495e; color: #bdc3c7;">
+                            <th style="padding: 8px;">Collège</th>
+                            <th style="padding: 8px;">Utilisateur</th>
+                            <th style="padding: 8px;">Rôle</th>
+                            <th style="padding: 8px;">Mot de passe</th>
+                        </tr>
+                    </thead>
+                    <tbody id="demo-credentials-body">
+                        <!-- Rempli dynamiquement -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Journal d'Audit & Historique d'Activité</h2>
+        <p style="margin-top: 0; color: #bdc3c7; font-size: 14px;">
+            Consultez l'historique complet des actions effectuées sur le serveur (connexions, modifications, créations et suppressions).
+        </p>
+        
+        <!-- Filtres -->
+        <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; background: #1a252f; padding: 15px; border-radius: 8px; align-items: flex-end;">
+            <div style="flex: 1; min-width: 150px;">
+                <label for="filter-user" style="display: block; margin-bottom: 5px; font-weight: bold; color: #bdc3c7; font-size: 12px;">Utilisateur</label>
+                <input type="text" id="filter-user" placeholder="Ex: admin" style="width: 100%;" oninput="debounce(filterLogs, 300)()">
+            </div>
+            <div style="flex: 1; min-width: 180px;">
+                <label for="filter-action" style="display: block; margin-bottom: 5px; font-weight: bold; color: #bdc3c7; font-size: 12px;">Action</label>
+                <select id="filter-action" style="width: 100%;" onchange="filterLogs()">
+                    <option value="">-- Toutes les actions --</option>
+                    <option value="connexion_reussie">Connexions réussies</option>
+                    <option value="connexion_echouee">Connexions échouées</option>
+                    <option value="playlist_create">Créations de diaporamas</option>
+                    <option value="playlist_update">Modifications de diaporamas</option>
+                    <option value="playlist_delete">Suppressions de diaporamas</option>
+                    <option value="playlist_publish">Publications de diaporamas</option>
+                    <option value="playlist_approve">Approbations de diaporamas</option>
+                    <option value="user_create">Créations d'utilisateurs</option>
+                    <option value="user_update">Modifications d'utilisateurs</option>
+                    <option value="user_delete">Suppressions d'utilisateurs</option>
+                    <option value="settings_update">Modifications des paramètres</option>
+                    <option value="securite_initialisation">Sécurité & Initialisation</option>
+                </select>
+            </div>
+            <div style="flex: 2; min-width: 200px;">
+                <label for="filter-search" style="display: block; margin-bottom: 5px; font-weight: bold; color: #bdc3c7; font-size: 12px;">Recherche par mot-clé</label>
+                <input type="text" id="filter-search" placeholder="Rechercher dans les détails..." style="width: 100%;" oninput="debounce(filterLogs, 300)()">
+            </div>
+            <div>
+                <button onclick="exportLogsToCSV()" style="background: #27ae60; font-weight: bold; height: 38px; display: flex; align-items: center; gap: 8px;">
+                    📥 Export CSV
+                </button>
+            </div>
+        </div>
+
+        <!-- Table de résultats -->
+        <div style="overflow-x: auto; background: #1a252f; border-radius: 8px; padding: 10px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+                <thead>
+                    <tr style="border-bottom: 2px solid #34495e; color: #bdc3c7;">
+                        <th style="padding: 10px; width: 160px;">Date & Heure</th>
+                        <th style="padding: 10px; width: 120px;">Utilisateur</th>
+                        <th style="padding: 10px; width: 120px;">Adresse IP</th>
+                        <th style="padding: 10px; width: 180px;">Type d'action</th>
+                        <th style="padding: 10px;">Détails de l'action</th>
+                    </tr>
+                </thead>
+                <tbody id="logs-table-body">
+                    <tr>
+                        <td colspan="5" style="padding: 20px; text-align: center; color: #bdc3c7;">Chargement du journal d'audit...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; background: #1a252f; padding: 10px 15px; border-radius: 8px;">
+            <span id="logs-pagination-info" style="font-size: 13px; color: #bdc3c7;">Affichage de 0 - 0 sur 0 lignes</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <button onclick="changeLogsPage(-1)" id="btn-logs-prev" style="background: #34495e; padding: 6px 12px; font-size: 12px;" disabled>‹ Précédent</button>
+                <span id="logs-page-indicator" style="font-size: 13px; font-weight: bold; color: white;">Page 1</span>
+                <button onclick="changeLogsPage(1)" id="btn-logs-next" style="background: #34495e; padding: 6px 12px; font-size: 12px;" disabled>Suivant ›</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2FA (Visible uniquement pour le compte admin principal) -->
+    <section id="section-2fa" style="display: none;">
+        <h2>Double Authentification (2FA)</h2>
+        <p style="margin-top: 0; color: #bdc3c7; font-size: 14px;">
+            Sécurisez l'accès au compte administrateur en exigeant un code à 6 chiffres depuis votre application d'authentification (Google Authenticator, Authy, etc.).
+        </p>
+
+        <div style="background: #1a252f; padding: 20px; border-radius: 8px; border: 1px solid #34495e;">
+            <p style="margin-top: 0; font-size: 15px;">
+                Statut : <span id="2fa-status-badge" style="padding: 3px 10px; border-radius: 4px; font-weight: bold; font-size: 13px;">Chargement...</span>
+            </p>
+
+            <!-- Bouton d'activation -->
+            <div id="2fa-setup-trigger" style="display: none; margin-top: 15px;">
+                <button onclick="start2FASetup()" style="background: #9b59b6; font-weight: bold;">🔒 Activer la double authentification</button>
+            </div>
+
+            <!-- Modal / Zone de configuration de la 2FA -->
+            <div id="2fa-setup-box" style="display: none; margin-top: 20px; background: #2c3e50; border: 1px solid #9b59b6; border-radius: 8px; padding: 20px;">
+                <h3 style="margin-top: 0; color: #9b59b6;">1. Scannez ce QR Code</h3>
+                <p style="font-size: 13px; color: #bdc3c7; margin-bottom: 15px;">
+                    Ouvrez votre application d'authentification sur votre téléphone et scannez ce QR code :
+                </p>
+                
+                <img id="2fa-qr-image" style="background: white; padding: 10px; border-radius: 8px; max-width: 180px; display: block; margin-bottom: 15px;" alt="QR Code 2FA">
+                
+                <p style="font-size: 13px; color: #bdc3c7; margin-bottom: 15px;">
+                    Ou entrez manuellement cette clé secrète : <code id="2fa-secret-key" style="font-family: monospace; font-size: 15px; color: #e74c3c; background: #1a252f; padding: 4px 8px; border-radius: 4px; display: inline-block;"></code>
+                </p>
+
+                <h3 style="color: #9b59b6; margin-top: 20px;">2. Validez l'activation</h3>
+                <p style="font-size: 13px; color: #bdc3c7; margin-bottom: 10px;">
+                    Entrez le code temporaire à 6 chiffres affiché par votre application pour confirmer la configuration :
+                </p>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="2fa-setup-code" placeholder="123456" maxlength="6" style="width: 100px; text-align: center; font-size: 18px; font-family: monospace; letter-spacing: 2px;">
+                    <button onclick="confirm2FA()" style="background: #2ecc71; font-weight: bold;">Confirmer et activer</button>
+                    <button onclick="cancel2FASetup()" class="secondary">Annuler</button>
+                </div>
+            </div>
+
+            <!-- Désactivation de la 2FA -->
+            <div id="2fa-active-box" style="display: none; margin-top: 15px;">
+                <p style="color: #2ecc71; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center; gap: 8px;">
+                    🛡️ La double authentification est actuellement active et protège le compte administrateur.
+                </p>
+                <button onclick="showDisable2FA()" class="danger" style="font-weight: bold;">🔓 Désactiver la double authentification</button>
+
+                <div id="2fa-disable-form" style="display: none; margin-top: 15px; background: #2c3e50; border: 1px solid #e74c3c; border-radius: 8px; padding: 15px; max-width: 400px;">
+                    <p style="margin-top: 0; font-size: 13px; color: #bdc3c7;">
+                        Pour désactiver la double authentification, veuillez confirmer votre mot de passe de compte admin :
+                    </p>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <input type="password" id="2fa-disable-password" placeholder="Mot de passe" style="flex: 1;">
+                        <button onclick="confirmDisable2FA()" class="danger">Confirmer</button>
+                        <button onclick="hideDisable2FA()" class="secondary">Annuler</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </section>
 
     <script>
@@ -265,6 +427,14 @@
 
             loadCookiesStatus();
             loadDemoDataStatus();
+            fetchLogs();
+
+            // N'afficher le panneau 2FA que pour le compte admin principal
+            const currentUsername = localStorage.getItem('pidyn_username');
+            if (currentUsername === 'admin') {
+                document.getElementById('section-2fa').style.display = 'block';
+                fetch2FAStatus();
+            }
         }
 
         function generateJWTSecret() {
@@ -447,6 +617,7 @@
             if (!confirm("Générer le jeu de données démo complet (5 collèges, réunions, cantine, utilisateurs @kikoo.ovh) ?")) return;
             document.getElementById('demo-data-status').innerText = "Génération en cours...";
             document.getElementById('demo-data-status').style.color = "#f39c12";
+            document.getElementById('demo-credentials-container').style.display = 'none';
 
             const res = await fetch('/api/admin/system/demo-data/generate', {
                 method: 'POST',
@@ -457,10 +628,68 @@
                 const data = await res.json();
                 alert(data.message);
                 loadDemoDataStatus();
+
+                if (data.credentials && data.credentials.length > 0) {
+                    const tbody = document.getElementById('demo-credentials-body');
+                    tbody.innerHTML = '';
+                    data.credentials.forEach(c => {
+                        let roleFr = c.role;
+                        if (c.role === 'cook') roleFr = 'Cuisinier';
+                        else if (c.role === 'secretary') roleFr = 'Secrétaire';
+                        else if (c.role === 'author') roleFr = 'Auteur';
+
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid #34495e';
+                        tr.innerHTML = `
+                            <td style="padding: 8px;">${c.college}</td>
+                            <td style="padding: 8px; font-weight: bold; color: #3498db;">${c.username}</td>
+                            <td style="padding: 8px; color: #e74c3c;">${roleFr}</td>
+                            <td style="padding: 8px; font-family: monospace; font-size: 14px; background: #1a252f; border-radius: 4px; padding: 4px 8px; color: #2ecc71;">${c.password}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                    document.getElementById('demo-credentials-container').style.display = 'block';
+                }
             } else {
                 alert("Erreur lors de la génération : " + await res.text());
                 loadDemoDataStatus();
             }
+        }
+
+        function printCredentials() {
+            const tableHtml = document.getElementById('demo-credentials-container').outerHTML;
+            const printWindow = window.open('', '', 'height=600,width=800');
+            printWindow.document.write('<html><head><title>Identifiants de Démonstration - OmniSign</title>');
+            printWindow.document.write('<style>');
+            printWindow.document.write('body { font-family: sans-serif; padding: 20px; color: #333; }');
+            printWindow.document.write('table { width: 100%; border-collapse: collapse; margin-top: 20px; }');
+            printWindow.document.write('th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }');
+            printWindow.document.write('th { background: #f2f2f2; }');
+            printWindow.document.write('h3 { color: #9b59b6; margin-bottom: 5px; }');
+            printWindow.document.write('button, p, span { display: none; }'); // Hide elements not needed for print
+            printWindow.document.write('</style></head><body>');
+            printWindow.document.write('<h2>OmniSign - Jeu de données de démonstration (Bac à sable)</h2>');
+            printWindow.document.write(tableHtml);
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.print();
+        }
+
+        function copyCredentialsText() {
+            const tbody = document.getElementById('demo-credentials-body');
+            let text = "Collège\tUtilisateur\tRôle\tMot de passe\n";
+            tbody.querySelectorAll('tr').forEach(tr => {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length === 4) {
+                    text += `${tds[0].innerText}\t${tds[1].innerText}\t${tds[2].innerText}\t${tds[3].innerText}\n`;
+                }
+            });
+            navigator.clipboard.writeText(text).then(() => {
+                alert("Tous les identifiants ont été copiés dans le presse-papiers !");
+            }).catch(err => {
+                alert("Erreur lors de la copie : " + err);
+            });
         }
 
         async function clearDemoData() {
@@ -475,10 +704,306 @@
             if (res.ok) {
                 const data = await res.json();
                 alert(data.message);
+                document.getElementById('demo-credentials-container').style.display = 'none';
                 loadDemoDataStatus();
             } else {
                 alert("Erreur lors de la suppression : " + await res.text());
                 loadDemoDataStatus();
+            }
+        }
+
+        let currentLogsPage = 1;
+        const logsLimit = 50;
+        let logsDebounceTimer;
+
+        function debounce(func, wait) {
+            return function(...args) {
+                clearTimeout(logsDebounceTimer);
+                logsDebounceTimer = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        async function fetchLogs() {
+            const user = document.getElementById('filter-user').value.trim();
+            const action = document.getElementById('filter-action').value;
+            const search = document.getElementById('filter-search').value.trim();
+
+            let url = `/api/admin/system/logs?page=${currentLogsPage}&limit=${logsLimit}`;
+            if (user) url += `&username=${encodeURIComponent(user)}`;
+            if (action) url += `&action=${encodeURIComponent(action)}`;
+            if (search) url += `&search=${encodeURIComponent(search)}`;
+
+            try {
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) throw new Error(await res.text());
+                const { logs, pagination } = await res.json();
+                renderLogs(logs);
+                renderLogsPagination(pagination);
+            } catch (e) {
+                console.error("Erreur chargement logs:", e);
+                document.getElementById('logs-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="5" style="padding: 20px; text-align: center; color: #e74c3c;">
+                            ❌ Erreur de chargement du journal d'audit : ${e.message}
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function renderLogs(logs) {
+            const tbody = document.getElementById('logs-table-body');
+            tbody.innerHTML = '';
+
+            if (logs.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="padding: 20px; text-align: center; color: #bdc3c7;">
+                            Aucune action enregistrée pour ces filtres.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            logs.forEach(log => {
+                const date = new Date(log.timestamp).toLocaleString('fr-FR');
+                
+                let badgeColor = "#7f8c8d";
+                let actionFr = log.action;
+                if (log.action.includes('reussie') || log.action.includes('create') || log.action.includes('approve')) {
+                    badgeColor = "#2ecc71"; // Vert
+                } else if (log.action.includes('echouee') || log.action.includes('delete') || log.action.includes('error')) {
+                    badgeColor = "#e74c3c"; // Rouge
+                } else if (log.action.includes('update') || log.action.includes('settings')) {
+                    badgeColor = "#3498db"; // Bleu
+                } else if (log.action.includes('publish')) {
+                    badgeColor = "#9b59b6"; // Violet
+                } else if (log.action.includes('securite')) {
+                    badgeColor = "#f1c40f"; // Jaune
+                }
+
+                const actionLabels = {
+                    'connexion_reussie': '🔑 Connexion Réussie',
+                    'connexion_echouee': '⚠️ Connexion Échouée',
+                    'playlist_create': '📁 Création Diaporama',
+                    'playlist_update': '📝 Modif Diaporama',
+                    'playlist_delete': '🗑️ Suppr Diaporama',
+                    'playlist_publish': '🚀 Publication Diaporama',
+                    'playlist_approve': '✅ Approb Diaporama',
+                    'user_create': '👤 Création Utilisateur',
+                    'user_update': '✍️ Modif Utilisateur',
+                    'user_delete': '❌ Suppr Utilisateur',
+                    'settings_update': '⚙️ Modif Paramètres',
+                    'securite_initialisation': '🔒 Sécurité Init'
+                };
+                const label = actionLabels[log.action] || log.action;
+
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #34495e';
+                tr.innerHTML = `
+                    <td style="padding: 10px; color: #bdc3c7;">${date}</td>
+                    <td style="padding: 10px; font-weight: bold; color: #ecf0f1;">${log.username}</td>
+                    <td style="padding: 10px; font-family: monospace; color: #7f8c8d;">${log.ip}</td>
+                    <td style="padding: 10px;">
+                        <span style="background: ${badgeColor}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block;">
+                            ${label}
+                        </span>
+                    </td>
+                    <td style="padding: 10px; color: #ecf0f1;">${log.details}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderLogsPagination(pagination) {
+            const { total, page, limit, pages } = pagination;
+            
+            const start = total === 0 ? 0 : (page - 1) * limit + 1;
+            const end = Math.min(page * limit, total);
+            
+            document.getElementById('logs-pagination-info').innerText = `Affichage de ${start} - ${end} sur ${total} lignes`;
+            document.getElementById('logs-page-indicator').innerText = `Page ${page} / ${pages || 1}`;
+            
+            document.getElementById('btn-logs-prev').disabled = page <= 1;
+            document.getElementById('btn-logs-next').disabled = page >= pages;
+        }
+
+        function changeLogsPage(direction) {
+            currentLogsPage += direction;
+            fetchLogs();
+        }
+
+        function filterLogs() {
+            currentLogsPage = 1;
+            fetchLogs();
+        }
+
+        async function exportLogsToCSV() {
+            const user = document.getElementById('filter-user').value.trim();
+            const action = document.getElementById('filter-action').value;
+            const search = document.getElementById('filter-search').value.trim();
+
+            let url = `/api/admin/system/logs?page=1&limit=5000`; 
+            if (user) url += `&username=${encodeURIComponent(user)}`;
+            if (action) url += `&action=${encodeURIComponent(action)}`;
+            if (search) url += `&search=${encodeURIComponent(search)}`;
+
+            try {
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) throw new Error(await res.text());
+                const { logs } = await res.json();
+                
+                if (logs.length === 0) {
+                    alert("Aucun log à exporter.");
+                    return;
+                }
+
+                let csvContent = "\ufeff"; 
+                csvContent += "Date & Heure;Utilisateur;Adresse IP;Action;Details;Site ID\n";
+                
+                logs.forEach(log => {
+                    const date = new Date(log.timestamp).toLocaleString('fr-FR');
+                    const cleanUser = (log.username || '').replace(/;/g, ',');
+                    const cleanIp = (log.ip || '').replace(/;/g, ',');
+                    const cleanAction = (log.action || '').replace(/;/g, ',');
+                    const cleanDetails = (log.details || '').replace(/"/g, '""').replace(/;/g, ',');
+                    const cleanSiteId = (log.siteId || '').replace(/;/g, ',');
+                    
+                    csvContent += `"${date}";"${cleanUser}";"${cleanIp}";"${cleanAction}";"${cleanDetails}";"${cleanSiteId}"\n`;
+                });
+
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const urlBlob = URL.createObjectURL(blob);
+                link.setAttribute("href", urlBlob);
+                link.setAttribute("download", `omnisign_audit_logs_${new Date().toISOString().slice(0,10)}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (e) {
+                alert("Erreur lors de l'export CSV : " + e.message);
+            }
+        }
+
+        let temp2FASecret = "";
+
+        async function fetch2FAStatus() {
+            try {
+                const res = await fetch('/api/admin/2fa/status', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                
+                const badge = document.getElementById('2fa-status-badge');
+                if (data.twoFactorEnabled) {
+                    badge.innerText = "Active";
+                    badge.style.background = "#2ecc71";
+                    badge.style.color = "white";
+                    document.getElementById('2fa-active-box').style.display = "block";
+                    document.getElementById('2fa-setup-trigger').style.display = "none";
+                    document.getElementById('2fa-setup-box').style.display = "none";
+                } else {
+                    badge.innerText = "Désactivée";
+                    badge.style.background = "#e74c3c";
+                    badge.style.color = "white";
+                    document.getElementById('2fa-active-box').style.display = "none";
+                    document.getElementById('2fa-setup-trigger').style.display = "block";
+                    document.getElementById('2fa-setup-box').style.display = "none";
+                }
+            } catch (err) {
+                console.error("Erreur statut 2FA:", err);
+            }
+        }
+
+        async function start2FASetup() {
+            try {
+                const res = await fetch('/api/admin/2fa/setup', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+                
+                temp2FASecret = data.secret;
+                document.getElementById('2fa-qr-image').src = data.qrCodeDataUrl;
+                document.getElementById('2fa-secret-key').innerText = data.secret;
+                
+                document.getElementById('2fa-setup-trigger').style.display = "none";
+                document.getElementById('2fa-setup-box').style.display = "block";
+                document.getElementById('2fa-setup-code').value = "";
+                document.getElementById('2fa-setup-code').focus();
+            } catch (err) {
+                alert("Erreur lors de la configuration 2FA : " + err.message);
+            }
+        }
+
+        function cancel2FASetup() {
+            temp2FASecret = "";
+            document.getElementById('2fa-setup-box').style.display = "none";
+            document.getElementById('2fa-setup-trigger').style.display = "block";
+        }
+
+        async function confirm2FA() {
+            const code = document.getElementById('2fa-setup-code').value.trim();
+            if (!code || code.length !== 6) return alert("Veuillez entrer un code à 6 chiffres");
+
+            try {
+                const res = await fetch('/api/admin/2fa/enable', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ secret: temp2FASecret, code })
+                });
+
+                if (res.ok) {
+                    alert("Double authentification activée avec succès !");
+                    temp2FASecret = "";
+                    fetch2FAStatus();
+                } else {
+                    alert("Échec d'activation : " + await res.text());
+                }
+            } catch (err) {
+                alert("Erreur : " + err.message);
+            }
+        }
+
+        function showDisable2FA() {
+            document.getElementById('2fa-disable-form').style.display = "block";
+            document.getElementById('2fa-disable-password').value = "";
+            document.getElementById('2fa-disable-password').focus();
+        }
+
+        function hideDisable2FA() {
+            document.getElementById('2fa-disable-form').style.display = "none";
+        }
+
+        async function confirmDisable2FA() {
+            const password = document.getElementById('2fa-disable-password').value;
+            if (!password) return alert("Mot de passe requis");
+
+            try {
+                const res = await fetch('/api/admin/2fa/disable', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password })
+                });
+
+                if (res.ok) {
+                    alert("Double authentification désactivée.");
+                    hideDisable2FA();
+                    fetch2FAStatus();
+                } else {
+                    alert("Échec de la désactivation : " + await res.text());
+                }
+            } catch (err) {
+                alert("Erreur : " + err.message);
             }
         }
 

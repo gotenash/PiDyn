@@ -23,16 +23,24 @@ echo.
 set /p TYPE_SERVEUR="Votre choix (1 ou 2, defaut: 1) : "
 if "%TYPE_SERVEUR%"=="" set TYPE_SERVEUR=1
 
-if "%TYPE_SERVEUR%"=="2" (
-    echo.
-    set /p SERVER_URL="Entrez l'URL complete du serveur (ex: http://omnisign.local:3000) : "
-) else (
-    echo.
-    set /p IP_SERVEUR="Entrez l'adresse IP du serveur local (ex: 192.168.1.50) : "
-    set /p PORT_SERVEUR="Entrez le port du serveur (defaut: 3000) : "
-    if "%PORT_SERVEUR%"=="" set PORT_SERVEUR=3000
-    set SERVER_URL=http://%IP_SERVEUR%:%PORT_SERVEUR%
-)
+if "%TYPE_SERVEUR%"=="2" goto server_distant
+if "%TYPE_SERVEUR%"=="1" goto server_local
+goto server_local
+
+:server_distant
+echo.
+set /p SERVER_URL="Entrez l'URL complete du serveur (ex: http://omnisign.local:3000) : "
+goto end_server_config
+
+:server_local
+echo.
+set /p IP_SERVEUR="Entrez l'adresse IP du serveur local (ex: 192.168.1.50) : "
+set /p PORT_SERVEUR="Entrez le port du serveur (defaut: 3000) : "
+if "%PORT_SERVEUR%"=="" set PORT_SERVEUR=3000
+set SERVER_URL=http://%IP_SERVEUR%:%PORT_SERVEUR%
+goto end_server_config
+
+:end_server_config
 
 if "%SERVER_URL%"=="" set SERVER_URL=http://localhost:3000
 
@@ -66,10 +74,7 @@ echo.
 
 (
   echo @echo off
-  echo :: Configuration generee par l'assistant
-  echo set PIDYN_SERVER_URL=%SERVER_URL%
-  echo set PIDYN_API_KEY=%API_KEY%
-  echo set PIDYN_DEVICE_ID=%DEVICE_ID%
+  echo :: Les parametres sont configures dans setup.txt et lus par le moteur JS.
   echo.
   echo :: Desactivation de la mise en veille de l'ecran sous Windows
   echo powercfg /change monitor-timeout-ac 0 ^>nul 2^>^&1

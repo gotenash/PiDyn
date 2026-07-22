@@ -1,4 +1,20 @@
 #!/bin/bash
+# Configuration pour le lancement à distance (SSH) sur l'écran physique local
+if [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ] || [ -n "$SSH_CONNECTION" ]; then
+    export DISPLAY=:0
+    USER_UID=$(id -u)
+    if [ -f "/run/user/$USER_UID/gdm/Xauthority" ]; then
+        export XAUTHORITY="/run/user/$USER_UID/gdm/Xauthority"
+    elif [ -f "$HOME/.Xauthority" ]; then
+        export XAUTHORITY="$HOME/.Xauthority"
+    fi
+fi
+
+# Fallback de sécurité si DISPLAY n'est pas défini
+if [ -z "$DISPLAY" ]; then
+    export DISPLAY=:0
+fi
+
 export GNOME_KEYRING_CONTROL=1
 export GNOME_KEYRING_PID=1
 export SECRET_VAULT_PASSWORD=none

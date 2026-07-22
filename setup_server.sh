@@ -110,6 +110,42 @@ else
     echo -e "${YELLOW}[INFO] Dossier Bureau non trouvé. Aucun raccourci n'a été créé.${NC}"
 fi
 
+echo "------------------------------------------------------------"
+echo -e "${BLUE} Option : Configuration du démarrage automatique au boot (systemd)${NC}"
+echo "------------------------------------------------------------"
+read -p "Voulez-vous installer le serveur en tant que service système pour qu'il démarre seul au boot ? (O/N) : " -n 1 -r
+echo ""
+if [[ $REPLY =~ ^[Oo]$ ]]; then
+    NODE_PATH=$(which node)
+    CURRENT_USER=$USER
+    CURRENT_DIR=$(pwd)
+    
+    echo "⚙️ Création du service systemd 'omnisign-server.service'..."
+    sudo bash -c "cat <<EOF > /etc/systemd/system/omnisign-server.service
+[Unit]
+Description=OmniSign Server (CMS)
+After=network.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$CURRENT_DIR/server
+ExecStart=$NODE_PATH server.js
+Restart=on-failure
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF"
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable omnisign-server.service
+    sudo systemctl restart omnisign-server.service
+    echo -e "${GREEN}[OK] Service systemd activé et démarré ! (omnisign-server.service)${NC}"
+else
+    echo -e "${YELLOW}[INFO] Configuration systemd ignorée. Le serveur devra être lancé manuellement.${NC}"
+fi
+
 echo ""
 echo "============================================================"
 echo -e "${GREEN}          INSTALLATION DU SERVEUR TERMINÉE !${NC}"

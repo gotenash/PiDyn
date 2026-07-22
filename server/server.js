@@ -577,7 +577,121 @@ async function initializeDatabase() {
             console.log(`Colonne "siteId" ajoutée à la table "${tableName}".`);
         }
     }
+
+    // Table audit_logs
+    await db.schema.hasTable('audit_logs').then(async (exists) => {
+        if (!exists) {
+            await db.schema.createTable('audit_logs', (table) => {
+                table.increments('id').primary();
+                table.string('timestamp').notNullable();
+                table.string('username').notNullable();
+                table.string('ip');
+                table.string('action').notNullable();
+                table.text('details');
+                table.string('siteId');
+            });
+            console.log('Table "audit_logs" créée.');
+        }
+    });
+
+    // Migration : Ajouter les colonnes 2FA à la table users
+    const has2FA = await db.schema.hasColumn('users', 'twoFactorEnabled');
+    if (!has2FA) {
+        await db.schema.table('users', (table) => {
+            table.boolean('twoFactorEnabled').defaultTo(false);
+            table.string('twoFactorSecret').nullable();
+        });
+        console.log('Colonnes 2FA ajoutées à la table "users".');
+    }
 }
+
+// Helper pour enregistrer une action dans le journal d'audit
+async function logAction(username, role, siteId, action, details, req = null) {
+    try {
+        let ip = null;
+        if (req) {
+            ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            if (ip && ip.includes(',')) {
+                ip = ip.split(',')[0].trim();
+            }
+        }
+        
+        await db('audit_logs').insert({
+            timestamp: new Date().toISOString(),
+            username: username || 'system',
+            ip: ip || '127.0.0.1',
+            action: action,
+            details: details || '',
+            siteId: siteId || null
+        });
+    } catch (err) {
+        console.error('❌ Erreur lors de l\'enregistrement dans le journal d\'audit:', err);
+    }
+}
+
+// Outils de Double Authentification (2FA) natifs
+function generateBase32Secret() {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const randomBytes = crypto.randomBytes(10);
+    let bits = '';
+    for (let i = 0; i < randomBytes.length; i++) {
+        bits += randomBytes[i].toString(2).padStart(8, '0');
+    }
+    let base32 = '';
+    for (let i = 0; i < bits.length; i += 5) {
+        base32 += alphabet[parseInt(bits.substr(i, 5), 2)];
+    }
+    return base32;
+}
+
+function base32Decode(base32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const cleaned = base32.replace(/=+$/, '').replace(/\s/g, '').toUpperCase();
+    let bits = '';
+    for (let i = 0; i < cleaned.length; i++) {
+        const val = alphabet.indexOf(cleaned[i]);
+        if (val === -1) throw new Error('Caractère Base32 invalide');
+        bits += val.toString(2).padStart(5, '0');
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+        bytes.push(parseInt(bits.substr(i, 8), 2));
+    }
+    return Buffer.from(bytes);
+}
+
+function verifyTOTP(secretBase32, code, window = 1, timeStep = 30) {
+    try {
+        const key = base32Decode(secretBase32);
+        const currentCounter = Math.floor(Date.now() / 1000 / timeStep);
+        
+        for (let i = -window; i <= window; i++) {
+            const counter = currentCounter + i;
+            const buffer = Buffer.alloc(8);
+            buffer.writeUInt32BE(0, 0);
+            buffer.writeUInt32BE(counter, 4);
+            
+            const hmac = crypto.createHmac('sha1', key);
+            hmac.update(buffer);
+            const hmacResult = hmac.digest();
+            
+            const offset = hmacResult[hmacResult.length - 1] & 0xf;
+            const candidateCodeVal = ((hmacResult[offset] & 0x7f) << 24) |
+                                     ((hmacResult[offset + 1] & 0xff) << 16) |
+                                     ((hmacResult[offset + 2] & 0xff) << 8) |
+                                     (hmacResult[offset + 3] & 0xff);
+            const candidateCode = (candidateCodeVal % 1000000).toString().padStart(6, '0');
+            
+            if (candidateCode === code) {
+                return true;
+            }
+        }
+    } catch (e) {
+        console.error("Erreur vérification TOTP:", e);
+    }
+    return false;
+}
+
 
 // Load settings from DB
 async function loadSettings() {
@@ -947,10 +1061,64 @@ app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     const user = await db('users').where({ username }).first();
     if (user && await bcrypt.compare(password, user.password)) {
+        // Sécurité : Supprimer le fichier de mot de passe initial après la première connexion réussie de l'admin
+        if (user.role === 'admin') {
+            try {
+                const dbDir = path.dirname(SQLITE_DB_PATH);
+                const pwdFilePath = path.join(dbDir, 'admin_password.txt');
+                if (await fs.pathExists(pwdFilePath)) {
+                    await fs.remove(pwdFilePath);
+                    console.log('🔒 Fichier de mot de passe d\'installation temporaire (admin_password.txt) supprimé après connexion de l\'admin.');
+                    await logAction(user.username, user.role, user.siteId, 'securite_initialisation', 'Suppression du mot de passe initial temporaire admin_password.txt', req);
+                }
+            } catch (err) {
+                console.error('Erreur lors de la suppression automatique de admin_password.txt:', err);
+            }
+        }
+
+        // Si la double authentification est activée pour l'admin
+        if (user.username === 'admin' && user.twoFactorEnabled) {
+            // Générer un jeton temporaire JWT valide pour 5 minutes
+            const tempToken = jwt.sign({ username: user.username, role: user.role, siteId: user.siteId, is2FA: true }, JWT_SECRET, { expiresIn: '5m' });
+            return res.json({ status: '2fa_required', tempToken });
+        }
+
+        await logAction(user.username, user.role, user.siteId, 'connexion_reussie', 'Connexion réussie au CMS', req);
+
         const token = jwt.sign({ username: user.username, role: user.role, siteId: user.siteId }, JWT_SECRET, { expiresIn: '1h' });
         res.json({ token: token, role: user.role, username: user.username, siteId: user.siteId });
     } else {
+        await logAction(username || 'anonymous', null, null, 'connexion_echouee', `Tentative de connexion échouée pour l'utilisateur : ${username || 'inconnu'}`, req);
         res.status(401).send('Identifiants incorrects');
+    }
+});
+
+// Route de vérification de la double authentification (2FA) pour le login
+app.post('/api/login/verify-2fa', async (req, res) => {
+    const { tempToken, code } = req.body;
+    if (!tempToken || !code) return res.status(400).send("Paramètres manquants");
+
+    try {
+        const decoded = jwt.verify(tempToken, JWT_SECRET);
+        if (!decoded || !decoded.is2FA) {
+            return res.status(401).send("Jeton temporaire invalide ou expiré");
+        }
+
+        const user = await db('users').where({ username: decoded.username }).first();
+        if (!user) return res.status(404).send("Utilisateur non trouvé");
+
+        const isValid = verifyTOTP(user.twoFactorSecret, code);
+        if (isValid) {
+            await logAction(user.username, user.role, user.siteId, 'connexion_reussie', 'Connexion réussie au CMS (via 2FA)', req);
+            const token = jwt.sign({ username: user.username, role: user.role, siteId: user.siteId }, JWT_SECRET, { expiresIn: '1h' });
+            res.json({ token: token, role: user.role, username: user.username, siteId: user.siteId });
+        } else {
+            await logAction(user.username, user.role, user.siteId, 'connexion_echouee', `Code 2FA invalide saisi par ${user.username}`, req);
+            res.status(401).send("Code de validation 2FA incorrect");
+        }
+    } catch (err) {
+        console.error("Erreur vérification login 2FA:", err);
+        res.status(401).send("Jeton temporaire expiré ou invalide");
     }
 });
 
@@ -1461,8 +1629,10 @@ app.post('/api/admin/users', authMiddleware, checkRole(['admin']), async (req, r
             const userData = { password: hashedPassword, role, email, siteId: siteId || null };
             if (existingUser) {
                 await db('users').where({ username }).update(userData);
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'user_update', `Modification de l'utilisateur "${username}" (Rôle : ${role})`, req);
             } else {
                 await db('users').insert({ username, ...userData });
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'user_create', `Création de l'utilisateur "${username}" (Rôle : ${role})`, req);
             }
             res.json({ success: true });
         })
@@ -1473,8 +1643,9 @@ app.delete('/api/admin/users/:username', authMiddleware, checkRole(['admin']), (
     const { username } = req.params;
     if (username === 'admin') return res.status(400).send('Impossible de supprimer le compte admin principal');
     db('users').where({ username }).del()
-        .then((count) => {
+        .then(async (count) => {
             if (count > 0) {
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'user_delete', `Suppression de l'utilisateur "${username}"`, req);
                 res.json({ success: true });
             } else {
                 res.status(404).send('Utilisateur non trouvé');
@@ -1843,6 +2014,7 @@ app.post('/api/admin/playlists', authMiddleware, checkRole(['admin', 'editor', '
                 playlistData.updatedBy = req.user.username;
                 playlistData.updatedAt = new Date().toISOString();
                 await db('playlists').where({ id: playlistId }).update(playlistData);
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'playlist_update', `Modification du diaporama "${name}"`, req);
             } else {
                 playlistData.createdBy = req.user.username;
                 playlistData.updatedBy = req.user.username;
@@ -1850,6 +2022,7 @@ app.post('/api/admin/playlists', authMiddleware, checkRole(['admin', 'editor', '
                 playlistData.updatedAt = new Date().toISOString();
                 playlistData.siteId = req.user.siteId; // Assigner le siteId
                 await db('playlists').insert(playlistData);
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'playlist_create', `Création du diaporama "${name}"`, req);
             }
             checkSchedules(null, true);
 
@@ -1873,9 +2046,12 @@ app.post('/api/admin/playlists', authMiddleware, checkRole(['admin', 'editor', '
 app.post('/api/admin/playlists/:id/approve', authMiddleware, checkRole(['admin', 'editor']), (req, res) => {
     const { id } = req.params;
     db('playlists').where({ id }).update({ status: 'approved' })
-        .then((count) => {
+        .then(async (count) => {
             if (count > 0) {
                 checkSchedules(null, true);
+                const playlist = await db('playlists').where({ id }).first();
+                const plName = playlist ? playlist.name : id;
+                await logAction(req.user.username, req.user.role, req.user.siteId, 'playlist_approve', `Approbation du diaporama "${plName}"`, req);
                 res.json({ success: true });
             } else {
                 res.status(404).send('Diaporama non trouvé');
@@ -1903,6 +2079,10 @@ app.post('/api/admin/playlists/:playlistId/publish', authMiddleware, checkRole([
         }
         
         checkSchedules(null, true);
+
+        const playlist = await db('playlists').where({ id: playlistId }).first();
+        const plName = playlist ? playlist.name : playlistId;
+        await logAction(req.user.username, req.user.role, req.user.siteId, 'playlist_publish', `Publication directe du diaporama "${plName}" sur les écrans`, req);
 
         if (NOTIFY_PLAYLIST_CHANGE) {
             const playlist = await db('playlists').where({ id: playlistId }).first();
@@ -1939,6 +2119,7 @@ app.delete('/api/admin/playlists/:id', authMiddleware, checkRole(['admin', 'edit
             }
 
             await db('playlists').where({ id }).del();
+            await logAction(req.user.username, req.user.role, req.user.siteId, 'playlist_delete', `Suppression du diaporama "${existingPlaylist.name}"`, req);
             await db('players').where({ manualPlaylistId: id }).update({ manualPlaylistId: null });
             await db('players').where({ currentPlaylistId: id }).update({ currentPlaylistId: null });
             await db('schedules').where({ playlistId: id }).del();
@@ -1990,10 +2171,165 @@ app.post('/api/admin/settings', authMiddleware, checkRole(['admin']), async (req
 
         checkSchedules(null, true); 
         console.log("⚙️ Paramètres système mis à jour.");
+        await logAction(req.user.username, req.user.role, req.user.siteId, 'settings_update', 'Modification des paramètres système généraux', req);
         res.json({ success: true });
     } catch (err) {
         console.error("Erreur sauvegarde settings:", err);
         res.status(500).send('Error saving settings: ' + err.message);
+    }
+});
+
+// GET /api/admin/2fa/status - Récupérer l'état 2FA de l'administrateur
+app.get('/api/admin/2fa/status', authMiddleware, async (req, res) => {
+    try {
+        const user = await db('users').where({ username: req.user.username }).first();
+        if (!user) return res.status(404).send('Utilisateur non trouvé');
+        res.json({ twoFactorEnabled: !!user.twoFactorEnabled });
+    } catch (err) {
+        console.error("Erreur status 2FA:", err);
+        res.status(500).send("Erreur lors de la récupération du statut 2FA");
+    }
+});
+
+// GET /api/admin/2fa/setup - Générer la clé et le QR code de configuration
+app.get('/api/admin/2fa/setup', authMiddleware, async (req, res) => {
+    try {
+        if (req.user.username !== 'admin') {
+            return res.status(403).send("La double authentification est réservée à l'administrateur système.");
+        }
+        
+        const secret = generateBase32Secret();
+        const label = `OmniSign:${req.user.username}`;
+        const otpAuthUrl = `otpauth://totp/${label}?secret=${secret}&issuer=OmniSign`;
+        const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl);
+        
+        res.json({ secret, qrCodeDataUrl });
+    } catch (err) {
+        console.error("Erreur génération 2FA setup:", err);
+        res.status(500).send("Erreur lors de la génération du QR code 2FA");
+    }
+});
+
+// POST /api/admin/2fa/enable - Activer la double authentification
+app.post('/api/admin/2fa/enable', authMiddleware, async (req, res) => {
+    try {
+        if (req.user.username !== 'admin') {
+            return res.status(403).send("La double authentification est réservée à l'administrateur système.");
+        }
+        
+        const { secret, code } = req.body;
+        if (!secret || !code) return res.status(400).send("Paramètres manquants");
+        
+        const isValid = verifyTOTP(secret, code);
+        if (isValid) {
+            await db('users').where({ username: req.user.username }).update({
+                twoFactorSecret: secret,
+                twoFactorEnabled: true
+            });
+            await logAction(req.user.username, req.user.role, req.user.siteId, '2fa_enable', "Double authentification activée pour l'administrateur", req);
+            res.json({ success: true });
+        } else {
+            res.status(400).send("Code de validation 2FA incorrect. Veuillez réessayer.");
+        }
+    } catch (err) {
+        console.error("Erreur activation 2FA:", err);
+        res.status(500).send("Erreur lors de l'activation de la 2FA");
+    }
+});
+
+// POST /api/admin/2fa/disable - Désactiver la double authentification
+app.post('/api/admin/2fa/disable', authMiddleware, async (req, res) => {
+    try {
+        if (req.user.username !== 'admin') {
+            return res.status(403).send("La double authentification est réservée à l'administrateur système.");
+        }
+        
+        const { password } = req.body;
+        if (!password) return res.status(400).send("Mot de passe requis");
+        
+        const user = await db('users').where({ username: req.user.username }).first();
+        if (!user) return res.status(404).send("Utilisateur non trouvé");
+        
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (isMatch) {
+            await db('users').where({ username: req.user.username }).update({
+                twoFactorSecret: null,
+                twoFactorEnabled: false
+            });
+            await logAction(req.user.username, req.user.role, req.user.siteId, '2fa_disable', "Double authentification désactivée pour l'administrateur", req);
+            res.json({ success: true });
+        } else {
+            res.status(400).send("Mot de passe incorrect");
+        }
+    } catch (err) {
+        console.error("Erreur désactivation 2FA:", err);
+        res.status(500).send("Erreur lors de la désactivation de la 2FA");
+    }
+});
+
+// API Admin : Récupérer le journal d'audit filtré et paginé
+app.get('/api/admin/system/logs', authMiddleware, checkRole(['admin', 'editor', 'author', 'cook', 'secretary']), async (req, res) => {
+    try {
+        let { page = 1, limit = 50, username, action, search } = req.query;
+        page = parseInt(page, 10) || 1;
+        limit = parseInt(limit, 10) || 50;
+        const offset = (page - 1) * limit;
+
+        // Query builder de base
+        let query = db('audit_logs');
+        let countQuery = db('audit_logs').count('* as count');
+
+        // Isolation multi-site : Les non-admins ne voient que les logs de leur propre site
+        if (req.user.role !== 'admin') {
+            if (req.user.siteId) {
+                query = query.where({ siteId: req.user.siteId });
+                countQuery = countQuery.where({ siteId: req.user.siteId });
+            } else {
+                query = query.where({ siteId: '___none___' });
+                countQuery = countQuery.where({ siteId: '___none___' });
+            }
+        }
+
+        // Filtre par utilisateur
+        if (username) {
+            query = query.where('username', 'like', `%${username}%`);
+            countQuery = countQuery.where('username', 'like', `%${username}%`);
+        }
+
+        // Filtre par type d'action
+        if (action) {
+            query = query.where({ action });
+            countQuery = countQuery.where({ action });
+        }
+
+        // Filtre de recherche dans les détails
+        if (search) {
+            query = query.where('details', 'like', `%${search}%`);
+            countQuery = countQuery.where('details', 'like', `%${search}%`);
+        }
+
+        // Exécuter les requêtes
+        const [totalCountResult] = await countQuery;
+        const total = totalCountResult.count;
+
+        const logs = await query
+            .select('*')
+            .orderBy('timestamp', 'desc')
+            .limit(limit)
+            .offset(offset);
+
+        res.json({
+            logs,
+            pagination: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (err) {
+        console.error("Erreur récupération logs d'audit:", err);
+        res.status(500).send("Erreur lors de la récupération du journal d'audit : " + err.message);
     }
 });
 
@@ -2401,7 +2737,7 @@ app.post('/api/admin/system/demo-data/generate', authMiddleware, checkRole(['adm
     try {
         await deleteDemoData();
 
-        const defaultPasswordHash = await bcrypt.hash('123456', saltRounds);
+        const generatedCredentials = [];
         const todayStr = new Date().toISOString().split('T')[0];
 
         const currentIsoWeek = getIsoWeekString(new Date());
@@ -2571,13 +2907,22 @@ app.post('/api/admin/system/demo-data/generate', authMiddleware, checkRole(['adm
                 .onConflict('id').merge();
 
             for (const u of col.users) {
+                const userPassword = generateStrongPassword(10);
+                const userPasswordHash = await bcrypt.hash(userPassword, saltRounds);
                 await db('users').insert({
                     username: u.username,
-                    password: defaultPasswordHash,
+                    password: userPasswordHash,
                     role: u.role,
                     email: u.email,
                     siteId: col.id
                 }).onConflict('username').merge();
+
+                generatedCredentials.push({
+                    college: col.name,
+                    username: u.username,
+                    password: userPassword,
+                    role: u.role
+                });
             }
 
             for (const r of col.rooms) {
@@ -2681,7 +3026,11 @@ app.post('/api/admin/system/demo-data/generate', authMiddleware, checkRole(['adm
         }
 
         console.log("✅ Jeu de données démo (5 Collèges) généré avec succès.");
-        res.json({ success: true, message: "Jeu de données démo (5 Collèges) créé avec succès !" });
+        res.json({ 
+            success: true, 
+            message: "Jeu de données démo (5 Collèges) créé avec succès !",
+            credentials: generatedCredentials
+        });
     } catch (err) {
         console.error("Erreur génération demo data:", err);
         res.status(500).send("Erreur lors de la génération du jeu de données : " + err.message);

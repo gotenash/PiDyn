@@ -31,10 +31,24 @@
  
     <div id="login-overlay">
         <div id="login-box">
-            <h2 style="margin: 0;">Connexion OmniSign</h2>
-            <input type="text" id="username" placeholder="Utilisateur" onkeydown="handleLoginKey(event)" style="width: 200px;">
-            <input type="password" id="password" placeholder="Mot de passe" onkeydown="handleLoginKey(event)" style="width: 200px;">
-            <button onclick="login()" style="width: 220px; font-weight: bold;">Se connecter</button>
+            <h2 style="margin: 0; color: #3498db;">Connexion OmniSign</h2>
+            
+            <!-- Étape 1 : Identifiants classiques -->
+            <div id="login-step1" style="display: flex; flex-direction: column; gap: 15px; align-items: center;">
+                <input type="text" id="username" placeholder="Utilisateur" onkeydown="handleLoginKey(event)" style="width: 200px;">
+                <input type="password" id="password" placeholder="Mot de passe" onkeydown="handleLoginKey(event)" style="width: 200px;">
+                <button onclick="login()" style="width: 220px; font-weight: bold;">Se connecter</button>
+            </div>
+
+            <!-- Étape 2 : Validation TOTP / 2FA -->
+            <div id="login-step2" style="display: none; flex-direction: column; gap: 15px; align-items: center; width: 220px;">
+                <p style="margin: 0; font-size: 12px; color: #bdc3c7; line-height: 1.4;">
+                    Double authentification active. Saisissez le code à 6 chiffres de votre application (ex: Google Authenticator) :
+                </p>
+                <input type="text" id="2fa-code" placeholder="------" maxlength="6" onkeydown="handle2FAKey(event)" style="width: 200px; text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 5px; font-family: monospace;">
+                <button onclick="verify2FA()" style="width: 220px; font-weight: bold; background: #2ecc71;">Valider</button>
+                <button onclick="cancel2FA()" class="secondary" style="width: 220px; padding: 6px; font-size: 11px;">Retour</button>
+            </div>
         </div>
     </div>
  
@@ -114,9 +128,17 @@
         let role = localStorage.getItem('pidyn_role');
         let socket = null;
 
+        let temp2FAToken = '';
+
         function handleLoginKey(event) {
             if (event.key === 'Enter') {
                 login();
+            }
+        }
+
+        function handle2FAKey(event) {
+            if (event.key === 'Enter') {
+                verify2FA();
             }
         }
 
@@ -130,14 +152,59 @@
             });
             if (res.ok) {
                 const data = await res.json();
+                if (data.status === '2fa_required') {
+                    temp2FAToken = data.tempToken;
+                    document.getElementById('login-step1').style.display = 'none';
+                    document.getElementById('login-step2').style.display = 'flex';
+                    document.getElementById('2fa-code').focus();
+                } else {
+                    token = data.token;
+                    role = data.role;
+                    localStorage.setItem('pidyn_token', token);
+                    localStorage.setItem('pidyn_role', role);
+                    localStorage.setItem('pidyn_username', data.username);
+                    localStorage.setItem('pidyn_siteId', data.siteId || '');
+                    checkAuth();
+                }
+            } else alert('Identifiants incorrects');
+        }
+
+        async function verify2FA() {
+            const code = document.getElementById('2fa-code').value.trim();
+            if (!code || code.length !== 6) return alert("Veuillez saisir un code à 6 chiffres");
+
+            const res = await fetch('/api/login/verify-2fa', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tempToken: temp2FAToken, code })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
                 token = data.token;
                 role = data.role;
                 localStorage.setItem('pidyn_token', token);
                 localStorage.setItem('pidyn_role', role);
                 localStorage.setItem('pidyn_username', data.username);
                 localStorage.setItem('pidyn_siteId', data.siteId || '');
+                
+                // Réinitialiser l'interface
+                document.getElementById('login-step2').style.display = 'none';
+                document.getElementById('login-step1').style.display = 'flex';
+                document.getElementById('2fa-code').value = '';
                 checkAuth();
-            } else alert('Identifiants incorrects');
+            } else {
+                alert("Code de validation incorrect");
+                document.getElementById('2fa-code').value = '';
+                document.getElementById('2fa-code').focus();
+            }
+        }
+
+        function cancel2FA() {
+            temp2FAToken = '';
+            document.getElementById('2fa-code').value = '';
+            document.getElementById('login-step2').style.display = 'none';
+            document.getElementById('login-step1').style.display = 'flex';
         }
 
         function logout() {

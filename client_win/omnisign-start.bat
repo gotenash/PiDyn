@@ -1,9 +1,7 @@
 @echo off
 
-:: Variables OmniSign
-set PIDYN_SERVER_URL=http://192.168.1.43:3000
-set PIDYN_API_KEY=HVTcSNqiTWHgm2J2zVqXeynLSFAmNGnw
-set PIDYN_DEVICE_ID=stick-manche-test
+:: Les paramètres sont configurés dans setup.txt et lus par le moteur JS.
+:: (Vous pouvez définir les variables PIDYN_SERVER_URL, PIDYN_API_KEY ou PIDYN_DEVICE_ID ici pour les surcharger).
 
 :: Désactivation définitive de la mise en veille de l'écran et du système sous Windows 10
 powercfg /change monitor-timeout-ac 0 >nul 2>&1

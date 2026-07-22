@@ -3,7 +3,7 @@ const axios = require('axios');
 const fs = require('fs-extra');
 const path = require('path');
 const http = require('http');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const os = require('os');
 const util = require('util');
 
