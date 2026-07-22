@@ -44,7 +44,9 @@ OmniSign is a comprehensive digital signage solution designed to provide central
 *   **Real-time Updates:** Utilizes Socket.IO to push instant playlist changes and updates to connected Raspberry Pi clients.
 *   **Maintenance & Backup:** Built-in ZIP backup and restoration tool for both the SQLite database and media files.
 *   **Data Persistence:** Stores all configuration, user data, playlists, and schedules in a SQLite database (`pidyn.sqlite`).
-*   **Authentication:** API key-based authentication for Raspberry Pi clients and token-based authentication for the administration panel.
+*   **Authentication & Two-Factor (2FA):** API key-based client authentication, token-based panel authentication, and secure TOTP (Time-based One-Time Passwords) double authentication compatible with Google Authenticator, restricted strictly to the root `admin` account.
+*   **System Audit Logs & Activities:** Centralized, isolated logs registry (logins, slide creations, publishes, system settings changes, user management) with a paginated UI browser, dynamic category filtering, and direct CSV exporting.
+*   **Systemd Server Daemonization:** Automated configuration prompts inside the Linux server setup script to deploy the CMS as a persistent background daemon service (`omnisign-server.service`).
 *   **System Logs:** Automated timestamps on all server and client logs for easier troubleshooting.
 *   **Standalone Executable:** Capability to package the server as a single `.exe` (Windows) or binary (Linux) using `pkg` for easier distribution.
 *   **PPTX Import:** Fully functional import of PowerPoint presentations converting slides into playlist images (requires `LibreOffice` and `pdftocairo` on the server).
@@ -52,7 +54,7 @@ OmniSign is a comprehensive digital signage solution designed to provide central
 *   **Interactive Slideshow Vignettes:** Grid/List view switcher. Grid view features animated thumbnails that cycle through the playlist slides, dynamically rendering the page background, scaled text layers (with custom fonts, alignment, colors), media images, media videos, clocks, and full templates (canteen, meeting status, weather, full-screen video with captions).
 ### Client-side (Raspberry Pi, Desktop Linux & Windows)
 *   **Automated Setup:** Improved `bash` scripts (`setup_pi.sh` for Raspberry Pi Bookworm/Trixie, `setup_linux.sh` for general Linux desktop systems like Linux Mint / Ubuntu), handling automated installations of Node.js, Chromium, audio/capture tools, and graphical configuration.
-*   **Universal Desktop session support:** Dynamic user, home directory and authority token lookup in `client_linux` ensuring smooth operation on standard client sessions.
+*   **Robust Screenshot Fallbacks:** Advanced multi-tool fallback mechanism (`gnome-screenshot` + `scrot` + `grim`) with auto-resolution of active display GDM authority variables, preventing black screens for hardware-accelerated players on Linux Desktop (Zorin OS) and Raspberry Pi.
 *   **Kiosk Mode:** Advanced Chromium configuration (auto-login, cursor hiding with `unclutter`, hardware acceleration) for a professional full-screen experience.
 *   **Automatic Boot:** Automatic configuration of LightDM, Openbox or desktop session autostart launchers to start the player immediately upon login/power-up.
 *   **Systemd / User Services:** Sets up `sync-engine.js` as a systemd background service (system-level or user-session level) for automatic operation.
@@ -194,7 +196,9 @@ OmniSign est une solution complète d'affichage dynamique conçue pour offrir un
 *   **Mises à Jour en Temps Réel :** Utilise Socket.IO pour envoyer instantanément les modifications et les mises à jour des playlists aux clients Raspberry Pi connectés.
 *   **Maintenance et Sauvegarde :** Outil intégré de sauvegarde et restauration au format ZIP (Base de données + Médias).
 *   **Persistance des Données :** Stocke toutes les configurations, les données utilisateur, les playlists et les planifications dans une base de données SQLite (`pidyn.sqlite`).
-*   **Authentification :** Authentification par clé API pour les clients Raspberry Pi et authentification par jeton pour le panneau d'administration.
+*   **Authentification & Double Facteur (2FA) :** Authentification par clé API pour les afficheurs, jetons JWT sécurisés pour l'administration, et double authentification TOTP (compatible Google Authenticator) exclusive au compte d'administration root `admin`.
+*   **Registre des Logs d'Audit :** Journal d'activité centralisé et cloisonné par site (connexions, modifications de diaporamas, CRUD utilisateurs, réglages système) doté d'une interface de recherche paginée et d'un outil d'export CSV.
+*   **Service Serveur Automatisé (systemd) :** Assistant d'installation Linux configurant sur demande un service système persistant (`omnisign-server.service`) pour démarrer le CMS automatiquement au boot.
 *   **Logs Système :** Horodatage automatique des logs serveur et client pour faciliter le dépannage.
 *   **Exécutable Autonome :** Possibilité de packager le serveur en un seul fichier `.exe` (Windows) ou binaire (Linux) via `pkg` pour une distribution simplifiée.
 *   **Import PPTX :** Importation de présentations PowerPoint entièrement fonctionnelle, convertissant les diapositives en images pour les playlists (nécessite `LibreOffice` et `pdftocairo` sur le serveur).
@@ -202,6 +206,7 @@ OmniSign est une solution complète d'affichage dynamique conçue pour offrir un
 *   **Vignettes de Diaporamas Interactives :** Commutateur Grille/Liste. La vue Grille propose des vignettes animées qui font défiler les pages en rendant l'arrière-plan et en adaptant dynamiquement à l'échelle les calques de texte (avec polices personnalisées, alignement, couleurs), les horloges, les éléments web, les images/vidéos ainsi que les modèles prédéfinis (menu cantine, statut de réunion, météo).
 ### Côté Client (Raspberry Pi, PC Linux & Windows)
 *   **Installation Automatisée :** Scripts d'installation complets (`setup_pi.sh` pour Raspberry Pi sous Debian Bookworm/Trixie, `setup_linux.sh` pour les postes clients Linux génériques comme Linux Mint ou Ubuntu), automatisant l'installation de Node, Chromium, des utilitaires audio/capture, et l'optimisation des DNS (IPv4-first).
+*   **Captures d'Écran d'Afficheurs Sécurisées :** Gestion de capture résiliente intégrant `gnome-screenshot` en cascade (évitant les écrans noirs sur les players à accélération matérielle comme Zorin OS) et résolution automatique de l'Xauthority GDM local.
 *   **Compatibilité de Session Générique :** Résolution dynamique de l'utilisateur, des répertoires personnels et des cookies d'affichage dans `client_linux` pour s'exécuter sur n'importe quel ordinateur de bureau standard.
 *   **Mode Kiosque :** Configuration avancée de Chromium (connexion auto, masquage souris via `unclutter`, accélération matérielle) pour un rendu plein écran professionnel.
 *   **Démarrage Automatique :** Configuration automatique de LightDM, Openbox ou des gestionnaires de session utilisateur pour démarrer le player automatiquement à l'ouverture de la session graphique.
